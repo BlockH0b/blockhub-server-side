@@ -845,6 +845,131 @@ router.get("/students", async (req, res) => {
 |--------------------------------------------------------------------------
 */
 
+/*
+|--------------------------------------------------------------------------
+| UPDATE CURRICULUM LINK
+| PATCH /cohort-tutor/curriculum
+|
+| Lets a tutor set/update the Google Doc/Drive link where they've
+| written their curriculum. Separate from the general profile update
+| so the tutor UI can offer a simple, single-field "paste your link"
+| box instead of the full profile form.
+|--------------------------------------------------------------------------
+*/
+
+router.patch("/curriculum", async (req, res) => {
+  try {
+    const { curriculumLink } = req.body;
+
+    if (
+      curriculumLink !== null &&
+      curriculumLink !== undefined &&
+      curriculumLink.trim() !== ""
+    ) {
+      const trimmedLink = curriculumLink.trim();
+
+      /*
+       * ------------------------------------------------------
+       * VALIDATE URL FORMAT
+       * ------------------------------------------------------
+       */
+
+      let parsedUrl;
+
+      try {
+        parsedUrl = new URL(trimmedLink);
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid link.",
+        });
+      }
+
+      if (
+        parsedUrl.protocol !== "http:" &&
+        parsedUrl.protocol !== "https:"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid link.",
+        });
+      }
+
+      /*
+       * ------------------------------------------------------
+       * OPTIONAL: RESTRICT TO GOOGLE LINKS ONLY
+       * ------------------------------------------------------
+       *
+       * Since the whole point is "a Google file link", this
+       * blocks anything that isn't Docs/Sheets/Slides/Drive.
+       * Remove this block if you'd rather accept any URL.
+       */
+
+      const allowedHosts = [
+        "docs.google.com",
+        "drive.google.com",
+        "sheets.google.com",
+      ];
+
+      const isGoogleLink = allowedHosts.some((host) =>
+        parsedUrl.hostname.includes(host)
+      );
+
+      if (!isGoogleLink) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please provide a Google Docs, Sheets, or Drive link.",
+        });
+      }
+
+      var finalLink = trimmedLink;
+    } else {
+      // Allow clearing the link by sending an empty string/null
+      var finalLink = null;
+    }
+
+    /*
+     * ------------------------------------------------------
+     * SAVE
+     * ------------------------------------------------------
+     */
+
+    const tutor = await CohortTutor.findById(
+      req.cohortTutor._id
+    );
+
+    if (!tutor) {
+      return res.status(404).json({
+        success: false,
+        message: "Cohort tutor profile not found.",
+      });
+    }
+
+    tutor.curriculumLink = finalLink;
+
+    await tutor.save();
+
+    return res.status(200).json({
+      success: true,
+      message: finalLink
+        ? "Curriculum link updated successfully."
+        : "Curriculum link removed.",
+      data: {
+        curriculumLink: tutor.curriculumLink,
+      },
+    });
+  } catch (error) {
+    console.error("updateCurriculumLink error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update curriculum link.",
+    });
+  }
+});
+
+
 function formatDuration(minutes) {
   if (!minutes) return null;
 

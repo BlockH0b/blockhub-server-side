@@ -7,7 +7,7 @@ const User = require("../models/user");
 const CohortRegistration = require("../models/Cohort");
 const Referral = require("../models/Referral");
 const createCohortToken = require("../utils/cohortToken");
-const { COHORT_COOKIE_NAME } = require("../middlewave/cohortAuth");
+const { COHORT_COOKIE_NAME, cohortAuth } = require("../middlewave/cohortAuth");
 const requireAdmin = require("../middlewave/adminAuth");
 const CohortTutor = require("../models/CohortTutor");
 const CohortClass = require("../models/CohortClass");
@@ -16,7 +16,11 @@ const CohortClass = require("../models/CohortClass");
 // =====================================================
 // GET COHORT STATISTICS
 // GET /user_cohort/stats
-//
+
+
+
+
+
 // Supported query params:
 // ?page=1
 // ?limit=10
@@ -202,6 +206,74 @@ router.get("/stats", async (req, res) => {
     }
 });
 
+// =====================================================
+// SWITCH TRACK
+// PATCH /user_cohort/switch-track
+//
+// Lets an authenticated student change their track for
+// their current cohort registration.
+// =====================================================
+router.patch("/switch-track", cohortAuth, async (req, res) => {
+    try {
+        const { userId, cohort } = req.cohortUser;
+
+        const { track } = req.body;
+
+        if (!track) {
+            return res.status(400).json({
+                success: false,
+                message: "Please select a track.",
+            });
+        }
+
+        // req.cohortUser.registration (from the middleware) is a
+        // .lean() object — can't call .save() on it. Fetch the real
+        // document here instead.
+        const registration = await CohortRegistration.findOne({
+            user: userId,
+            cohort,
+        });
+
+        if (!registration) {
+            return res.status(404).json({
+                success: false,
+                message: "Cohort registration not found.",
+            });
+        }
+
+        if (registration.status === "completed") {
+            return res.status(403).json({
+                success: false,
+                message: "You can't switch tracks after completing the cohort.",
+            });
+        }
+
+        const validTracks = await CohortRegistration.distinct("track");
+
+        if (!validTracks.includes(track)) {
+            return res.status(400).json({
+                success: false,
+                message: "That track isn't available.",
+            });
+        }
+
+        registration.track = track;
+        await registration.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Track updated successfully.",
+            registration,
+        });
+    } catch (error) {
+        console.error("❌ Switch track error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to switch track.",
+        });
+    }
+});
 
 router.post("/admin/fix-3d-track",  async (req, res) => {
     try {
@@ -220,6 +292,7 @@ router.post("/admin/fix-3d-track",  async (req, res) => {
                 modified: 0,
             });
         }
+       
 
         // Update every matching registration
         const result = await CohortRegistration.updateMany(
@@ -251,6 +324,7 @@ router.post("/admin/fix-3d-track",  async (req, res) => {
             modified: result.modifiedCount,
             oldTracks,
         });
+
     } catch (error) {
         console.error("❌ Track migration error:", error);
 
@@ -433,14 +507,12 @@ router.post("/login", async (req, res) => {
 });
 
 
-
 // =====================================================
 // GET ALL COHORT TRACKS
 // GET /user_cohort/tracks
 //
 // Useful for the frontend filter dropdown.
 // =====================================================
-
 router.get("/tracks", async (req, res) => {
     try {
         const tracks = await CohortRegistration.distinct("track");
@@ -808,12 +880,11 @@ router.post("/register", async (req, res) => {
     }
 });
 
-
 /**
- * GET /cohort/registrations
- *
- * Get all Cohort 1.0 registrations
- */
+//  * GET /cohort/registrations
+//  *
+//  * Get all Cohort 1.0 registrations
+//  */
 router.get("/registrations", async (req, res) => {
     try {
         const registrations = await CohortRegistration.find({
@@ -845,11 +916,9 @@ router.get("/registrations", async (req, res) => {
 });
 
 
-
 // =====================================================
 // MAKE USER A COHORT TUTOR
 // =====================================================
-
 router.post("/cohort-tutors", requireAdmin, async (req, res) => {
     try {
         const {
@@ -1187,7 +1256,6 @@ router.get("/cohort-tutors", requireAdmin, async (req, res) => {
         });
     }
 });
-
 
 
 module.exports = router;

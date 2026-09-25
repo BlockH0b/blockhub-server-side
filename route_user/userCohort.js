@@ -79,6 +79,33 @@ const getCohortStatus = (startDate, endDate) => {
     return "upcoming";
 };
 
+router.get("/check-auth", async (req, res) => {
+    try {
+        const token = req.cookies?.BHCtoken;
+
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: "Authentication required",
+            });
+        }
+
+        // Optional but recommended:
+        // Verify the token here
+        // const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        return res.status(200).json({
+            success: true,
+            message: "Authenticated",
+        });
+    } catch (error) {
+        return res.status(401).json({
+            success: false,
+            message: "Invalid or expired authentication",
+        });
+    }
+});
+
 // ==========================================
 // GET USER COHORT DASHBOARD
 // ==========================================
