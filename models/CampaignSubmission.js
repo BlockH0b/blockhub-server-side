@@ -46,4 +46,8 @@ const campaignSubmissionSchema = new mongoose.Schema(
     }
 );
 
+
+ 
+
+
 module.exports = mongoose.model("campaignSubmissions", campaignSubmissionSchema);

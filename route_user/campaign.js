@@ -1120,22 +1120,22 @@ router.post("/submit-task", auth, async (req, res) => {
         // Check Existing Submission
         //----------------------------------
 
-        const existingSubmission = await CampaignSubmission.findOne({
-            campaign: campaignId,
-            task: taskId,
-            user: userId,
-        });
+        // const existingSubmission = await CampaignSubmission.findOne({
+        //     campaign: campaignId,
+        //     task: taskId,
+        //     user: userId,
+        // });
 
-        if (existingSubmission) {
+        // if (existingSubmission) {
 
-            if (requirements.oneSubmissionPerUser) {
-                return res.status(400).json({
-                    success: false,
-                    message: "You have already submitted this task.",
-                    submission: existingSubmission,
-                });
-            }
-        }
+        //     if (requirements.oneSubmissionPerUser) {
+        //         return res.status(400).json({
+        //             success: false,
+        //             message: "You have already submitted this task.",
+        //             submission: existingSubmission,
+        //         });
+        //     }
+        // }
 
         //----------------------------------
         // Check Wallet Submission
@@ -1160,6 +1160,23 @@ router.post("/submit-task", auth, async (req, res) => {
                 });
             }
         }
+
+
+        const duplicateSubmission = await CampaignSubmission.findOne({
+            campaign: campaignId,
+            task: taskId,
+            user: userId,
+            "submission.url": url,
+        });
+
+        if (duplicateSubmission) {
+            return res.status(400).json({
+                success: false,
+                message: "You have already submitted this link for this task.",
+                submission: duplicateSubmission,
+            });
+        }
+
 
         //----------------------------------
         // Create Submission
