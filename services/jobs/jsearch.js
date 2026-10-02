@@ -15,6 +15,8 @@ const getJSearchJobs = async () => {
     );
 
 
+    
+
 
     return response.data.data.map(job => ({
       title: job.job_title || "Untitled Role",
