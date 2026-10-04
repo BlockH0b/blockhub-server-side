@@ -606,7 +606,7 @@ router.post("/login", async (req, res) => {
         if (!userInstance) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password",
+                message: "Invalid email",
             });
         }
 
@@ -617,7 +617,7 @@ router.post("/login", async (req, res) => {
         if (password !== FIXED_PASSWORD) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password",
+                message: "Invalid  password",
             });
         }
 
