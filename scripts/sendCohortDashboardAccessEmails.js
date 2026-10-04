@@ -12,7 +12,7 @@ require("dotenv").config({
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 
-const User = require("../models/User");
+const User = require("../models/user");
 const CohortAccessToken = require("../models/CohortAccessToken");
 const CohortRegistration = require("../models/Cohort");
 

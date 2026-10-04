@@ -205,5 +205,144 @@ const sendAcademyThankYou = async (email, name, courses = []) => {
 };
 
 
+const sendCohortWelcomeEmail = async (email, name, track) => {
+  try {
+    const info = await transport.sendMail({
+      from: `BlockHub Team <${process.env.MAIL_USER}>`,
+      to: email,
+      subject: "Welcome to BlockHub Cohort 1.0 🎉",
 
-module.exports = { sendOTP, sendAcademyThankYou, sendSuccessMessage, sendWhatsappInvite, sendPortfolioEmail }
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="margin:0; padding:0; background:#f5f5f5; font-family:Arial, Helvetica, sans-serif;">
+
+            <table
+              width="100%"
+              cellpadding="0"
+              cellspacing="0"
+              border="0"
+              style="margin:0; padding:30px 0; background:#f5f5f5;"
+            >
+              <tr>
+                <td align="center">
+
+                  <table
+                    width="620"
+                    cellpadding="0"
+                    cellspacing="0"
+                    border="0"
+                    style="
+                      width:100%;
+                      max-width:620px;
+                      background:#ffffff;
+                      margin:0 auto;
+                    "
+                  >
+
+                    <!-- IMAGE -->
+                    <tr>
+                      <td style="padding:0; margin:0; line-height:0; font-size:0;">
+                        <img
+                          src="https://res.cloudinary.com/dd7faellv/image/upload/v1788434434/photo_2026-09-03_12-19-22_tvehzz.jpg"
+                          alt="BlockHub"
+                          width="620"
+                          style="
+                            display:block;
+                            width:100%;
+                            max-width:620px;
+                            height:auto;
+                            margin:0;
+                            padding:0;
+                            border:0;
+                          "
+                        />
+                      </td>
+                    </tr>
+
+                    <!-- CONTENT -->
+                    <tr>
+                      <td style="padding:35px 30px; color:#222222;">
+
+                        <h2 style="margin:0 0 20px; font-size:24px;">
+                          Welcome to BlockHub Cohort 1.0 🎉
+                        </h2>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0 0 16px;">
+                          Hi ${name || "there"},
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0 0 16px;">
+                          Congratulations! Your registration for
+                          <strong>BlockHub Cohort 1.0</strong> has been successfully received.
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0 0 16px;">
+                          You selected:
+                        </p>
+
+                        <p style="
+                          font-size:16px;
+                          line-height:1.7;
+                          margin:0 0 20px;
+                          padding:14px 16px;
+                          background:#f3f3f3;
+                          border-radius:8px;
+                        ">
+                          <strong>Track:</strong> ${track || "Your selected track"}
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0 0 16px;">
+                          We’re excited to have you join us. More information about
+                          the cohort, onboarding, classes, and next steps will be
+                          communicated to you through the official BlockHub channels.
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0 0 25px;">
+                          Keep an eye on your email and stay connected with the
+                          BlockHub community so you don't miss important updates.
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:0;">
+                          Welcome to the cohort. 🚀
+                        </p>
+
+                        <p style="font-size:16px; line-height:1.7; margin:25px 0 0;">
+                          Best regards,<br />
+                          <strong>BlockHub Team</strong>
+                        </p>
+
+                      </td>
+                    </tr>
+
+                  </table>
+
+                </td>
+              </tr>
+            </table>
+
+          </body>
+        </html>
+      `,
+    });
+
+    console.log("✅ Cohort welcome email sent:", info.response);
+
+    return {
+      success: true,
+      message: "Cohort welcome email sent",
+    };
+  } catch (error) {
+    console.error("❌ Error sending cohort welcome email:", error);
+
+    return {
+      success: false,
+      message: "Error sending cohort welcome email",
+      error,
+    };
+  }
+};
+
+
+
+module.exports = { sendOTP, sendCohortWelcomeEmail, sendAcademyThankYou, sendSuccessMessage, sendWhatsappInvite, sendPortfolioEmail }

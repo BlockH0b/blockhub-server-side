@@ -495,222 +495,178 @@ router.get(
 // ============================================================
 // SIGNUP
 // ============================================================
-
 router.post("/signup", async (req, res) => {
-
     try {
-
         const {
             fullName,
             email,
             interest,
-            linkedinUrl
+            track,
+            profileImage,
+            bio,
+            description,
+            expertise,
+            cohortContribution,
+            personalDetail,
+            linkedinUrl,
+            xUrl,
+            followersCount,
+            followingCount,
+            tweetCount,
         } = req.body;
 
-
         const uniqueId = Date.now();
+        const dummyTwitterId = `demo_${uniqueId}`;
 
-        const dummyTwitterId =
-            "demo_" + uniqueId;
+        const userInstance = await user.create({
+            fullName,
+            email: email || null,
 
+            interest: interest || [],
 
-        const userInstance =
-            await user.create({
+            track: track || null,
 
-                fullName,
+            profileImage: profileImage || null,
 
-                email,
+            twitterId: dummyTwitterId,
 
-                interest:
-                    interest || [],
+            twitterHandle: xUrl
+                ? xUrl.split("/").pop()
+                : null,
 
-                twitterId:
-                    dummyTwitterId,
+            xUrl: xUrl || null,
 
-                twitterHandle:
-                    linkedinUrl,
+            linkedinUrl: linkedinUrl || null,
 
-                linkedinUrl:
-                    linkedinUrl || null,
+            bio: bio || null,
 
-            });
+            description: description || null,
 
+            expertise: expertise || [],
+
+            cohortContribution: cohortContribution || null,
+
+            personalDetail: personalDetail || null,
+
+            followersCount: followersCount || 0,
+            followingCount: followingCount || 0,
+            tweetCount: tweetCount || 0,
+        });
 
         res.status(201).json({
-
             success: true,
-
             userInstance,
-
         });
 
     } catch (err) {
-
-        console.error(
-            "Signup error:",
-            err
-        );
-
+        console.error("Signup error:", err);
 
         res.status(500).json({
-
             success: false,
-
-            message:
-                "Signup failed",
-
+            message: "Signup failed",
+            error: err.message,
         });
-
     }
-
 });
-
 
 // ============================================================
 // LOGIN
 // ============================================================
 
 router.post("/login", async (req, res) => {
-
     try {
-
         const {
             email,
             password
         } = req.body;
 
-
         const FIXED_PASSWORD =
             process.env.FIXED_USER_PASSWORD ||
             "blockhub123";
 
+        // ----------------------------------------------------
+        // VALIDATION
+        // ----------------------------------------------------
 
         if (!email || !password) {
-
             return res.status(400).json({
-
                 success: false,
-
-                message:
-                    "Email and password are required",
-
+                message: "Email and password are required",
             });
-
         }
 
+        // ----------------------------------------------------
+        // FIND USER
+        // ----------------------------------------------------
 
-        const userInstance =
-            await user.findOne({
-                email
-            });
+        const userInstance = await user.findOne({
+            email: email.trim().toLowerCase(),
+        });
 
-
-        if (
-            !userInstance ||
-            password !== FIXED_PASSWORD
-        ) {
-
+        if (!userInstance) {
             return res.status(401).json({
-
                 success: false,
-
-                message:
-                    "Invalid email or password",
-
+                message: "Invalid email or password",
             });
-
         }
 
+        // ----------------------------------------------------
+        // CHECK PASSWORD
+        // ----------------------------------------------------
 
-        const token =
-            jwt.sign(
+        if (password !== FIXED_PASSWORD) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid email or password",
+            });
+        }
 
-                {
-                    id: userInstance._id,
-                    admin: userInstance.admin,
-                },
+        // ----------------------------------------------------
+        // GENERATE JWT
+        // Same idea as Twitter authentication
+        // ----------------------------------------------------
 
-                process.env.JWT_SECRET,
+        const token = jwt.sign(
+            {
+                id: userInstance._id,
+                admin: userInstance.admin,
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: "30d",
+            }
+        );
 
-                {
-                    expiresIn: "7d",
-                }
+        // ----------------------------------------------------
+        // SET BLOCKHUB AUTH COOKIE
+        // ----------------------------------------------------
 
-            );
+        setAuthCookie(res, token);
 
-
-        const {
-            admin,
-            ...userWithoutAdmin
-        } = userInstance.toObject();
-
-
-        const fullUser = {
-
-            ...userWithoutAdmin,
-
-            token,
-
-        };
-
-
-        const encodedUser =
-            encodeURIComponent(
-
-                Buffer
-                    .from(
-                        JSON.stringify(fullUser)
-                    )
-                    .toString("base64")
-
-            );
-
+        // ----------------------------------------------------
+        // FRONTEND URL
+        // ----------------------------------------------------
 
         const frontendUrl =
             process.env.USER_FRONTEND_URL ||
             "http://localhost:5173";
 
+        // ----------------------------------------------------
+        // REDIRECT TO PROFILE
+        // ----------------------------------------------------
 
-        const redirectUrl =
-            `${frontendUrl}/profile?token=${token}&user=${encodedUser}`;
-
-
-        setAuthCookie(
-            res,
-            token
+        return res.redirect(
+            `${frontendUrl}/profile`
         );
-
-
-        return res.json({
-
-            success: true,
-
-            user: userInstance,
-
-            redirectUrl,
-
-        });
-
 
     } catch (err) {
-
-        console.error(
-            "Login error:",
-            err
-        );
-
+        console.error("Login error:", err);
 
         return res.status(500).json({
-
             success: false,
-
-            message:
-                "Login failed",
-
+            message: "Login failed",
         });
-
     }
-
 });
 
 

@@ -11,6 +11,7 @@ const { COHORT_COOKIE_NAME, cohortAuth } = require("../middlewave/cohortAuth");
 const requireAdmin = require("../middlewave/adminAuth");
 const CohortTutor = require("../models/CohortTutor");
 const CohortClass = require("../models/CohortClass");
+const { sendCohortWelcomeEmail } = require("../utils/nodemailer");
 
 
 // =====================================================
@@ -275,7 +276,7 @@ router.patch("/switch-track", cohortAuth, async (req, res) => {
     }
 });
 
-router.post("/admin/fix-3d-track",  async (req, res) => {
+router.post("/admin/fix-3d-track", async (req, res) => {
     try {
         // Find all registrations whose track starts with "3D"
         const oldTracks = await CohortRegistration.find({
@@ -292,7 +293,7 @@ router.post("/admin/fix-3d-track",  async (req, res) => {
                 modified: 0,
             });
         }
-       
+
 
         // Update every matching registration
         const result = await CohortRegistration.updateMany(
@@ -687,6 +688,14 @@ router.post("/register", async (req, res) => {
         // =====================================================
         // REFERRAL SYSTEM
         // =====================================================
+
+
+        await sendCohortWelcomeEmail(
+            user.email,
+            user.fullName,
+            track
+        );
+
 
         if (referralCode) {
             try {
