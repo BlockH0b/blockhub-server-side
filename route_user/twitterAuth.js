@@ -641,23 +641,25 @@ router.post("/login", async (req, res) => {
         // SET BLOCKHUB AUTH COOKIE
         // ----------------------------------------------------
 
-        setAuthCookie(res, token);
+     // ----------------------------------------------------
+// SET BLOCKHUB AUTH COOKIE
+// ----------------------------------------------------
 
-        // ----------------------------------------------------
-        // FRONTEND URL
-        // ----------------------------------------------------
+setAuthCookie(res, token);
 
-        const frontendUrl =
-            process.env.USER_FRONTEND_URL ||
-            "http://localhost:5173";
+// ----------------------------------------------------
+// LOGIN SUCCESS
+// ----------------------------------------------------
 
-        // ----------------------------------------------------
-        // REDIRECT TO PROFILE
-        // ----------------------------------------------------
-
-        return res.redirect(
-            `${frontendUrl}/profile`
-        );
+return res.status(200).json({
+  success: true,
+  message: "Login successful",
+  user: {
+    id: userInstance._id,
+    email: userInstance.email,
+    admin: userInstance.admin,
+  },
+});
 
     } catch (err) {
         console.error("Login error:", err);
