@@ -179,4 +179,9 @@ bot.on("message", async (ctx, next) => {
 
 });
 
+// Any error inside a bot command is logged, never crashes the server
+bot.catch((err) => {
+    console.error("🤖 Telegram bot error:", err?.message || err);
+});
+
 module.exports = bot;

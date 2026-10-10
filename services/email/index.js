@@ -97,6 +97,7 @@ async function sendEmail({
     user = null, // userId - enables preferences + unsubscribe link
     dedupeKey,
     attachments,
+    icalEvent, // calendar invite (see services/meetings/calendar.js)
     _skipTestLimit = false,
 }) {
     const email = String(to || "").trim().toLowerCase();
@@ -157,6 +158,7 @@ async function sendEmail({
             text: rendered.text,
             headers,
             attachments,
+            icalEvent,
         });
 
         await EmailLog.updateOne(

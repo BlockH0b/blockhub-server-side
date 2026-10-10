@@ -3,6 +3,7 @@
  * Scheduled emails (node-cron, Lagos time)
  * ============================================================
  *   every 5 min  - class reminders (1 hour before)
+ *   every 5 min  - BlockHub Meetings reminders (1 hour before)
  *   every 30 min - "new campaign is live"
  *   hourly       - campaign ending in 24h / campaign ended
  *   daily 10:00  - academy "pick up where you left off"
@@ -309,6 +310,13 @@ async function courseNudges() {
    Start
 ------------------------------------------------------------ */
 
+/* ------------------------------------------------------------
+   BlockHub Meetings - reminder 1 hour before
+------------------------------------------------------------ */
+async function meetingReminders() {
+    await require("../meetings/notify").reminders();
+}
+
 function wrap(name, fn) {
     return async () => {
         try {
@@ -331,6 +339,7 @@ function startEmailJobs() {
 
     const opts = { timezone: TZ };
     cron.schedule("*/5 * * * *", wrap("classReminders", classReminders), opts);
+    cron.schedule("2-59/5 * * * *", wrap("meetingReminders", meetingReminders), opts);
     cron.schedule("*/30 * * * *", wrap("campaignsWentLive", campaignsWentLive), opts);
     cron.schedule("5 * * * *", wrap("campaignsEndingSoon", campaignsEndingSoon), opts);
     cron.schedule("10 * * * *", wrap("campaignsEnded", campaignsEnded), opts);
@@ -346,6 +355,7 @@ module.exports = {
     // exported so an admin can trigger them manually / for testing
     jobs: {
         classReminders,
+        meetingReminders,
         weeklyDigest,
         campaignsWentLive,
         campaignsEndingSoon,

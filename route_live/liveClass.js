@@ -29,6 +29,11 @@
  *
  *  LIVEKIT
  *    POST   /webhook                           attendance from LiveKit events
+ *
+ *  BLOCKHUB MEETINGS
+ *    Meetings (route_meetings/) use these same endpoints for the call
+ *    itself. Their LiveSession has kind "meeting": no track, admins
+ *    host, and anyone who RSVP'd (or is signed in) can join.
  * ==================================================================
  */
 
@@ -56,6 +61,8 @@ const {
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { liveClassAuth, requireHost } = require("../middlewave/liveClassAuth");
 const notify = require("../services/email/notify");
+const Meeting = require("../models/Meeting");
+const meetingNotify = require("../services/meetings/notify");
 
 /* ==================================================================
    WEBHOOK  (must be registered before JSON-only handlers)
@@ -169,15 +176,40 @@ function tooManyLookups(key, limit = 40, windowMs = 60 * 1000) {
 
 const STALE_AFTER_MS = 10 * 60 * 60 * 1000; // live for 10h+ => treat as ended
 
+const isMeeting = (session) => session?.kind === "meeting";
+
+/** Words used in messages: "class"/"tutor" vs "meeting"/"host" */
+function words(session) {
+    return isMeeting(session)
+        ? { noun: "meeting", host: "host", people: "everyone" }
+        : { noun: "class", host: "tutor", people: "students" };
+}
+
 function hostCanManage(viewer, session) {
+    // Meetings: any BlockHub admin can run them (even if they're also a tutor)
+    if (isMeeting(session)) return Boolean(viewer.isAdmin);
     if (viewer.role !== "host") return false;
     if (viewer.kind === "admin") return true;
     return viewer.cohort === session.cohort && viewer.track === session.track;
 }
 
 function viewerCanAccess(viewer, session) {
+    if (isMeeting(session)) {
+        // Guests only get into the one meeting they RSVP'd to
+        if (viewer.kind === "guest") return String(viewer.meetingId) === String(session.meeting);
+        return true;
+    }
     if (viewer.kind === "admin") return true;
     return viewer.cohort === session.cohort && viewer.track === session.track;
+}
+
+/** Keep the Meeting's status in step with its call */
+async function syncMeetingStatus(session, status) {
+    if (!isMeeting(session) || !session.meeting) return;
+    await Meeting.updateOne(
+        { _id: session.meeting, status: { $ne: "cancelled" } },
+        { $set: { status } }
+    ).catch((error) => console.error("[live_class] meeting status sync:", error?.message));
 }
 
 async function endSession(session) {
@@ -197,6 +229,11 @@ async function endSession(session) {
 
     if (livekit.isConfigured()) await livekit.closeRoom(session.roomName);
     await closeAllVisits(session._id);
+
+    if (isMeeting(session)) {
+        await syncMeetingStatus(session, "ended");
+        return;
+    }
 
     // Nudge students who didn't show up (scheduled classes only)
     notify.missedClass(session);
@@ -218,11 +255,29 @@ async function toSessionDTO(session, viewer) {
         }
     }
 
+    let meetingInfo = null;
+    if (isMeeting(session) && session.meeting) {
+        const meeting = await Meeting.findById(session.meeting)
+            .select("title description startsAt durationMinutes hostName status")
+            .lean();
+        if (meeting) {
+            meetingInfo = {
+                id: String(meeting._id),
+                description: meeting.description || "",
+                startsAt: meeting.startsAt,
+                durationMinutes: meeting.durationMinutes,
+                hostName: meeting.hostName,
+                status: meeting.status,
+            };
+        }
+    }
+
     const host = await User.findById(session.host).select("fullName profileImage").lean();
 
     const dto = {
         id: String(session._id),
         code: session.code,
+        kind: isMeeting(session) ? "meeting" : "class",
         title: session.title,
         cohort: session.cohort,
         track: session.track,
@@ -234,10 +289,11 @@ async function toSessionDTO(session, viewer) {
         },
         startedAt: session.startedAt,
         endedAt: session.endedAt,
-        joinUrl: joinUrlFor(session.code),
+        joinUrl: isMeeting(session) ? meetingUrlFor(session.code) : joinUrlFor(session.code),
         class: classInfo,
+        meeting: meetingInfo,
         host: {
-            name: host?.fullName || "Tutor",
+            name: meetingInfo?.hostName || host?.fullName || (isMeeting(session) ? "Host" : "Tutor"),
             avatar: host?.profileImage || null,
         },
     };
@@ -304,23 +360,46 @@ async function loadSession(req, res, { mustManage = false } = {}) {
     }
 
     if (!viewerCanAccess(req.viewer, session)) {
-        res.status(403).json({
-            success: false,
-            code: "WRONG_TRACK",
-            message: `This class is for the ${session.track} track. You can only join classes for your own track.`,
-        });
+        if (isMeeting(session)) {
+            res.status(401).json({
+                success: false,
+                code: "MEETING_RSVP_REQUIRED",
+                meetingCode: session.code,
+                message: "Tell us your name and email to join this meeting.",
+            });
+            return null;
+        }
+
+        res.status(403).json(
+            req.viewer.kind === "member" || req.viewer.kind === "guest"
+                ? {
+                    success: false,
+                    code: "NOT_IN_COHORT",
+                    message: "This class is only for BlockHub Cohort students. Sign in with your cohort account to join.",
+                }
+                : {
+                    success: false,
+                    code: "WRONG_TRACK",
+                    message: `This class is for the ${session.track} track. You can only join classes for your own track.`,
+                }
+        );
         return null;
     }
 
     if (mustManage && !hostCanManage(req.viewer, session)) {
         res.status(403).json({
             success: false,
-            message: "Only the class tutor can do this.",
+            message: `Only the ${words(session).host} can do this.`,
         });
         return null;
     }
 
     return session;
+}
+
+function meetingUrlFor(code) {
+    const base = (process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, "");
+    return `${base}/meet/${code}`;
 }
 
 function requireLiveKit(req, res, next) {
@@ -455,8 +534,8 @@ router.get("/sessions", requireHost, async (req, res) => {
     try {
         const filter =
             req.viewer.kind === "admin"
-                ? {}
-                : { cohort: req.viewer.cohort, track: req.viewer.track };
+                ? { kind: { $ne: "meeting" } }
+                : { cohort: req.viewer.cohort, track: req.viewer.track, kind: { $ne: "meeting" } };
 
         const sessions = await LiveSession.find(filter)
             .sort({ createdAt: -1 })
@@ -490,7 +569,11 @@ router.get("/sessions", requireHost, async (req, res) => {
 
 router.get("/sessions/active", async (req, res) => {
     try {
-        const filter = { status: { $in: ["live", "scheduled"] } };
+        const filter = { status: { $in: ["live", "scheduled"] }, kind: { $ne: "meeting" } };
+
+        if (!req.viewer.cohort && req.viewer.kind !== "admin") {
+            return res.json({ success: true, data: [] });
+        }
 
         if (req.viewer.kind !== "admin") {
             filter.cohort = req.viewer.cohort;
@@ -568,11 +651,13 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
         const viewer = req.viewer;
         const isHost = hostCanManage(viewer, session);
 
+        const w = words(session);
+
         if (session.status === "ended") {
             return res.status(410).json({
                 success: false,
                 code: "ENDED",
-                message: "This class has ended.",
+                message: `This ${w.noun} has ended.`,
             });
         }
 
@@ -582,8 +667,15 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                 session.startedAt = session.startedAt || new Date();
                 await session.save();
 
-                // "Your class is live" email to the track (once per session)
-                notify.classLive(session, viewer.name);
+                if (isMeeting(session)) {
+                    await syncMeetingStatus(session, "live");
+                    const meeting = await Meeting.findById(session.meeting);
+                    // "We're live" email to people who RSVP'd
+                    if (meeting) meetingNotify.live(meeting, session);
+                } else {
+                    // "Your class is live" email to the track (once per session)
+                    notify.classLive(session, viewer.name);
+                }
 
                 if (session.cohortClass) {
                     await CohortClass.updateOne(
@@ -602,7 +694,7 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                 return res.status(403).json({
                     success: false,
                     code: "REMOVED",
-                    message: "You were removed from this class by the tutor.",
+                    message: `You were removed from this ${w.noun} by the ${w.host}.`,
                 });
             }
 
@@ -610,7 +702,9 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                 return res.status(409).json({
                     success: false,
                     code: "NOT_STARTED",
-                    message: "Your tutor hasn't started the class yet. You'll be let in automatically once it starts.",
+                    message: isMeeting(session)
+                        ? "The host hasn't started the meeting yet. You'll be let in automatically once it starts."
+                        : "Your tutor hasn't started the class yet. You'll be let in automatically once it starts.",
                 });
             }
 
@@ -637,7 +731,7 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                     return res.status(202).json({
                         success: true,
                         waiting: true,
-                        message: "Asking to join... your tutor will let you in soon.",
+                        message: `Asking to join... the ${w.host} will let you in soon.`,
                     });
                 }
 
@@ -645,7 +739,7 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                     return res.status(202).json({
                         success: true,
                         waiting: true,
-                        message: "Waiting for your tutor to let you in.",
+                        message: `Waiting for the ${w.host} to let you in.`,
                     });
                 }
 
@@ -653,7 +747,7 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                     return res.status(403).json({
                         success: false,
                         code: "DENIED",
-                        message: "Your tutor didn't let you into this class.",
+                        message: `The ${w.host} didn't let you into this ${w.noun}.`,
                     });
                 }
             }
@@ -680,6 +774,10 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
             name: viewer.name,
         });
 
+        if (isMeeting(session) && !isHost) {
+            await markMeetingJoin(session, viewer);
+        }
+
         return res.json({
             success: true,
             data: {
@@ -693,9 +791,52 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
         });
     } catch (error) {
         console.error("live token error:", error);
-        return res.status(500).json({ success: false, message: "Unable to join the class right now." });
+        return res.status(500).json({ success: false, message: "Unable to join right now. Please try again." });
     }
 });
+
+/** Meetings: note when someone who RSVP'd first joins (and link their account) */
+async function markMeetingJoin(session, viewer) {
+    try {
+        const now = new Date();
+        if (viewer.kind === "guest") {
+            await Meeting.updateOne(
+                { _id: session.meeting, "rsvps._id": viewer.userId, "rsvps.firstJoinedAt": null },
+                { $set: { "rsvps.$.firstJoinedAt": now } }
+            );
+            return;
+        }
+
+        const email = String(viewer.email || "").toLowerCase();
+        const meeting = await Meeting.findById(session.meeting);
+        if (!meeting) return;
+
+        let rsvp = meeting.rsvps.find(
+            (r) => (r.user && String(r.user) === viewer.userId) || (email && r.email === email)
+        );
+
+        if (!rsvp && email) {
+            // Signed-in member who joined without RSVP - add them so the host sees them
+            meeting.rsvps.push({
+                name: viewer.name,
+                email,
+                user: viewer.userId,
+                status: "going",
+                source: "account",
+                respondedAt: now,
+            });
+            rsvp = meeting.rsvps[meeting.rsvps.length - 1];
+        }
+
+        if (rsvp) {
+            if (!rsvp.user) rsvp.user = viewer.userId;
+            if (!rsvp.firstJoinedAt) rsvp.firstJoinedAt = now;
+            await meeting.save();
+        }
+    } catch (error) {
+        console.error("[live_class] meeting join mark:", error?.message);
+    }
+}
 
 /* ------------------------------------------------------------------
    STOP WAITING                         DELETE /sessions/:code/lobby/me
@@ -762,6 +903,21 @@ router.patch("/sessions/:code/settings", requireHost, async (req, res) => {
 
         await session.save();
 
+        // Meetings: keep the meeting's own settings in step
+        if (isMeeting(session)) {
+            await Meeting.updateOne(
+                { _id: session.meeting },
+                {
+                    $set: {
+                        "settings.waitingRoom": Boolean(session.settings.waitingRoom),
+                        "settings.allowScreenShare": Boolean(session.settings.allowStudentScreenShare),
+                        "settings.muteOnJoin": session.settings.muteStudentsOnJoin !== false,
+                        ...(typeof title === "string" && title.trim() ? { title: session.title } : {}),
+                    },
+                }
+            ).catch(() => null);
+        }
+
         // Apply screen-share change to students already in the call
         if (
             typeof allowStudentScreenShare === "boolean" &&
@@ -795,7 +951,7 @@ router.patch("/sessions/:code/settings", requireHost, async (req, res) => {
 
         return res.json({
             success: true,
-            message: "Class settings updated.",
+            message: "Settings updated.",
             data: await toSessionDTO(session, req.viewer),
         });
     } catch (error) {
@@ -815,7 +971,7 @@ router.post("/sessions/:code/end", requireHost, async (req, res) => {
 
         if (session.status !== "ended") await endSession(session);
 
-        return res.json({ success: true, message: "Class ended for everyone." });
+        return res.json({ success: true, message: `${isMeeting(session) ? "Meeting" : "Class"} ended for everyone.` });
     } catch (error) {
         console.error("end live session error:", error);
         return res.status(500).json({ success: false, message: "Unable to end the class." });
@@ -989,18 +1145,35 @@ router.get("/sessions/:code/attendance", requireHost, async (req, res) => {
         const session = await loadSession(req, res, { mustManage: true });
         if (!session) return;
 
+        let meetingDoc = null;
+        if (isMeeting(session)) {
+            meetingDoc = await Meeting.findById(session.meeting).select("rsvps").lean();
+        }
+
         const [rows, registrations] = await Promise.all([
             LiveAttendance.find({ session: session._id })
                 .populate("user", "fullName email profileImage")
                 .lean(),
-            CohortRegistration.find({
-                cohort: session.cohort,
-                track: session.track,
-                status: { $ne: "rejected" },
-            })
-                .select("user fullName email")
-                .lean(),
+            isMeeting(session)
+                // "Expected" for a meeting = everyone who RSVP'd yes
+                ? Promise.resolve(
+                    (meetingDoc?.rsvps || [])
+                        .filter((r) => r.status === "going")
+                        .map((r) => ({ user: r.user || r._id, rsvpId: r._id, fullName: r.name, email: r.email }))
+                )
+                : CohortRegistration.find({
+                    cohort: session.cohort,
+                    track: session.track,
+                    status: { $ne: "rejected" },
+                })
+                    .select("user fullName email")
+                    .lean(),
         ]);
+
+        // Guests aren't BlockHub users: look up their email from the RSVP
+        const rsvpById = new Map(
+            (meetingDoc?.rsvps || []).map((r) => [String(r._id), r])
+        );
 
         const now = Date.now();
 
@@ -1011,10 +1184,11 @@ router.get("/sessions/:code/attendance", requireHost, async (req, res) => {
                 const liveSeconds = openVisit
                     ? Math.round((now - new Date(openVisit.joinedAt).getTime()) / 1000)
                     : 0;
+                const rsvp = rsvpById.get(String(row.user?._id || row.user));
                 return {
                     userId: String(row.user?._id || row.user),
                     name: row.user?.fullName || row.name,
-                    email: row.user?.email || null,
+                    email: row.user?.email || rsvp?.email || null,
                     avatar: row.user?.profileImage || null,
                     firstJoinedAt: row.firstJoinedAt,
                     lastLeftAt: row.lastLeftAt,
@@ -1027,7 +1201,7 @@ router.get("/sessions/:code/attendance", requireHost, async (req, res) => {
         const presentIds = new Set(present.map((p) => p.userId));
 
         const absent = registrations
-            .filter((reg) => !presentIds.has(String(reg.user)))
+            .filter((reg) => !presentIds.has(String(reg.user)) && !(reg.rsvpId && presentIds.has(String(reg.rsvpId))))
             .map((reg) => ({
                 userId: String(reg.user),
                 name: reg.fullName,

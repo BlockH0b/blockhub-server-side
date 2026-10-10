@@ -58,7 +58,7 @@ function resolveRecipients(to) {
 
 /**
  * Low-level send. Applies test-mode redirect.
- * mail = { to, subject, html, text, headers, attachments, from }
+ * mail = { to, subject, html, text, headers, attachments, icalEvent, from }
  */
 async function deliver(mail) {
     const config = getConfig();
@@ -92,6 +92,7 @@ async function deliver(mail) {
         text: mail.text,
         headers: mail.headers,
         attachments: mail.attachments,
+        icalEvent: mail.icalEvent,
     });
 
     return { delivered: true, recipients, testMode, messageId: info?.messageId };

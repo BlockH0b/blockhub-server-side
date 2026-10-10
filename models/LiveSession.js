@@ -8,6 +8,10 @@ const mongoose = require("mongoose");
  *
  * Students join with the code (e.g. "kqm-tzwa-pxd") or the link
  * /class/<code>. Only students in the same cohort + track can join.
+ *
+ * kind: "meeting" -> a general BlockHub Meeting (see models/Meeting.js).
+ * Those have no cohort/track; anyone with the link who RSVPs can join
+ * and only admins can host.
  */
 
 const lobbyEntrySchema = new mongoose.Schema(
@@ -33,8 +37,22 @@ const liveSessionSchema = new mongoose.Schema(
 
         title: { type: String, required: true, trim: true },
 
-        cohort: { type: String, required: true, default: "cohort-1.0", index: true },
-        track: { type: String, required: true, trim: true, index: true },
+        kind: { type: String, enum: ["class", "meeting"], default: "class", index: true },
+        meeting: { type: mongoose.Schema.Types.ObjectId, ref: "Meeting", default: null },
+
+        // Required for cohort classes only (meetings have no track)
+        cohort: {
+            type: String,
+            required: function cohortRequired() { return this.kind !== "meeting"; },
+            default: "cohort-1.0",
+            index: true,
+        },
+        track: {
+            type: String,
+            required: function trackRequired() { return this.kind !== "meeting"; },
+            trim: true,
+            index: true,
+        },
 
         // Optional link to the scheduled class this call is for
         cohortClass: {

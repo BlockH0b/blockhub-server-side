@@ -162,4 +162,24 @@ function layout(content, opts = {}) {
 </html>`;
 }
 
-module.exports = { layout, h1, p, small, eyebrow, button, details, quote, itemList, esc, textToHtml, C };
+/** Row of small outline links, e.g. calendar buttons: [["Google Calendar", url], ...] */
+function linkRow(links) {
+    const cells = links
+        .filter(([, url]) => url)
+        .map(
+            ([label, url]) => `
+    <td style="padding:0 8px 8px 0">
+      <a href="${esc(url)}" target="_blank"
+         style="display:inline-block;padding:9px 14px;border:1px solid ${C.border};border-radius:10px;background:#070707;font:600 12px/1 ${FONT};color:${C.green};text-decoration:none">
+         ${esc(label)}
+      </a>
+    </td>`
+        )
+        .join("");
+    return `
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:6px 0 10px">
+  <tr>${cells}</tr>
+</table>`;
+}
+
+module.exports = { layout, h1, p, small, eyebrow, button, details, quote, itemList, linkRow, esc, textToHtml, C };

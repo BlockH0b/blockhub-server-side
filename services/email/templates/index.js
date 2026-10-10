@@ -6,7 +6,7 @@
  * ============================================================
  */
 
-const { h1, p, small, eyebrow, button, details, quote, itemList, esc, textToHtml } = require("../layout");
+const { h1, p, small, eyebrow, button, details, quote, itemList, linkRow, esc, textToHtml } = require("../layout");
 
 const TZ = process.env.COHORT_TIMEZONE || "Africa/Lagos";
 
@@ -29,6 +29,15 @@ function fmtMoney(amount, currency = "NGN") {
     if (currency === "NGN") return `₦${value.toLocaleString("en-NG")}`;
     if (currency === "FREE") return "Free";
     return `${value.toLocaleString("en-US")} ${currency}`;
+}
+
+function meetingDuration(minutes) {
+    const m = Number(minutes) || 0;
+    if (!m) return "";
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return r ? `${h} hr ${r} min` : `${h} hr`;
 }
 
 const first = (name) => (String(name || "").trim().split(/\s+/)[0] || "there");
@@ -493,6 +502,134 @@ const T = {
             p("Thanks for joining the waitlist. We'll email you as soon as it opens.") +
             button("Visit BlockHub", ctx.frontendUrl),
         text: "You're on the BlockHub waitlist.",
+    }),
+
+    /* ======================================================
+       BLOCKHUB MEETINGS (general calls hosted by admins)
+       data.meeting = { title, description, startsAt, endsAt,
+                        durationMinutes, hostName, url, code }
+       data.links   = { google, outlook, ics }
+    ====================================================== */
+
+    meeting_invite: ({ name, meeting, acceptUrl, declineUrl, message, invitedBy }) => ({
+        subject: `You're invited: ${meeting.title} — ${fmtDate(meeting.startsAt)}`,
+        preheader: `${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)} on BlockHub Live`,
+        html:
+            eyebrow("BlockHub Meeting · Invitation") +
+            h1(meeting.title) +
+            p(`Hi ${esc(first(name))}, ${esc(invitedBy || "the BlockHub team")} invited you to a call on BlockHub.`) +
+            (message ? quote(textToHtml(message)) : "") +
+            details([
+                ["Date", fmtDate(meeting.startsAt)],
+                ["Time", fmtTime(meeting.startsAt)],
+                ["Duration", meetingDuration(meeting.durationMinutes)],
+                ["Host", meeting.hostName],
+            ]) +
+            (meeting.description ? p(textToHtml(String(meeting.description).slice(0, 800))) : "") +
+            button("Accept invite", acceptUrl) +
+            small(`Accepting books your spot and adds the meeting to your calendar. Can't make it? <a href="${esc(declineUrl)}" style="color:#48FF75">Decline</a>.`),
+        text: `You're invited to ${meeting.title} on ${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. Accept: ${acceptUrl}`,
+    }),
+
+    meeting_rsvp_confirmed: ({ name, meeting, links, joinUrl, declineUrl }) => ({
+        subject: `✅ You're booked: ${meeting.title} — ${fmtDate(meeting.startsAt)}`,
+        preheader: `${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. It's in your calendar.`,
+        html:
+            eyebrow("BlockHub Meeting · Confirmed") +
+            h1(`You're in, ${first(name)}!`) +
+            p(`Your spot for <strong style="color:#fff">${esc(meeting.title)}</strong> is booked. We've attached a calendar invite, so it should show up in your calendar automatically.`) +
+            details([
+                ["Date", fmtDate(meeting.startsAt)],
+                ["Time", fmtTime(meeting.startsAt)],
+                ["Duration", meetingDuration(meeting.durationMinutes)],
+                ["Host", meeting.hostName],
+                ["Meeting code", meeting.code],
+            ]) +
+            button("Open the meeting page", joinUrl) +
+            small("Not in your calendar? Add it here:") +
+            linkRow([
+                ["Google Calendar", links?.google],
+                ["Outlook", links?.outlook],
+                ["Apple / other (.ics)", links?.ics],
+            ]) +
+            small(`We'll remind you 1 hour before it starts. Can't make it anymore? <a href="${esc(declineUrl)}" style="color:#48FF75">Cancel my spot</a>.`),
+        text: `You're booked for ${meeting.title} on ${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. Join: ${joinUrl}`,
+    }),
+
+    meeting_rsvp_declined: ({ name, meeting, joinUrl }) => ({
+        subject: `Spot cancelled: ${meeting.title}`,
+        preheader: "We've removed it from your calendar.",
+        html:
+            eyebrow("BlockHub Meeting") +
+            h1("Your spot is cancelled") +
+            p(`Hi ${esc(first(name))}, you won't be attending <strong style="color:#fff">${esc(meeting.title)}</strong> (${esc(fmtDate(meeting.startsAt))}). We've removed it from your calendar.`) +
+            button("Changed your mind? Book again", joinUrl),
+        text: `Your spot for ${meeting.title} is cancelled. Book again: ${joinUrl}`,
+    }),
+
+    meeting_updated: ({ name, meeting, previousStartsAt, links, joinUrl }) => ({
+        subject: `Updated: ${meeting.title} — now ${fmtDate(meeting.startsAt)}`,
+        preheader: `Now ${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. Your calendar is updated.`,
+        html:
+            eyebrow("BlockHub Meeting · Updated") +
+            h1(`${meeting.title} has changed`) +
+            p(`Hi ${esc(first(name))}, the details for this meeting changed. Your calendar invite has been updated.`) +
+            details([
+                ["Date", fmtDate(meeting.startsAt)],
+                ["Time", fmtTime(meeting.startsAt)],
+                ["Duration", meetingDuration(meeting.durationMinutes)],
+                ["Was", previousStartsAt ? `${fmtDate(previousStartsAt)} ${fmtTime(previousStartsAt)}` : ""],
+            ]) +
+            button("Open the meeting page", joinUrl) +
+            linkRow([
+                ["Google Calendar", links?.google],
+                ["Outlook", links?.outlook],
+                ["Apple / other (.ics)", links?.ics],
+            ]),
+        text: `${meeting.title} is now ${fmtDate(meeting.startsAt)} ${fmtTime(meeting.startsAt)}. ${joinUrl}`,
+    }),
+
+    meeting_cancelled: ({ name, meeting, reason }, ctx) => ({
+        subject: `Cancelled: ${meeting.title}`,
+        preheader: `The meeting on ${fmtDate(meeting.startsAt)} won't hold.`,
+        html:
+            eyebrow("BlockHub Meeting · Cancelled") +
+            h1(`${meeting.title} is cancelled`) +
+            p(`Hi ${esc(first(name))}, sorry — this meeting has been cancelled and removed from your calendar.`) +
+            details([
+                ["Was", `${fmtDate(meeting.startsAt)} ${fmtTime(meeting.startsAt)}`],
+            ]) +
+            (reason ? quote(textToHtml(reason), "#f59e0b") : "") +
+            button("Visit BlockHub", ctx.frontendUrl),
+        text: `${meeting.title} (${fmtDate(meeting.startsAt)}) is cancelled. ${reason || ""}`,
+    }),
+
+    meeting_reminder: ({ name, meeting, joinUrl }) => ({
+        subject: `⏰ Starts in 1 hour: ${meeting.title}`,
+        preheader: `Today at ${fmtTime(meeting.startsAt)} on BlockHub Live`,
+        html:
+            eyebrow("BlockHub Meeting · Reminder") +
+            h1("Your meeting starts in 1 hour") +
+            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(meeting.title)}</strong> starts at ${esc(fmtTime(meeting.startsAt))}.`) +
+            details([
+                ["Date", fmtDate(meeting.startsAt)],
+                ["Time", fmtTime(meeting.startsAt)],
+                ["Host", meeting.hostName],
+            ]) +
+            button("Open the meeting", joinUrl) +
+            small("Test your camera and mic a few minutes early on the join screen."),
+        text: `${meeting.title} starts in 1 hour (${fmtTime(meeting.startsAt)}). Join: ${joinUrl}`,
+    }),
+
+    meeting_live: ({ name, meeting, joinUrl }) => ({
+        subject: `🔴 Live now: ${meeting.title}`,
+        preheader: `${meeting.hostName || "The host"} just started the call.`,
+        html:
+            eyebrow("BlockHub Meeting · Live now") +
+            h1(`${meeting.title} is live`) +
+            p(`Hi ${esc(first(name))}, the host has started the call. Jump in!`) +
+            button("Join the meeting", joinUrl),
+        text: `Live now: ${meeting.title}. Join: ${joinUrl}`,
     }),
 
     /* ======================================================

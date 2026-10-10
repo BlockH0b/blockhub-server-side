@@ -95,14 +95,46 @@ mongoose.connect(process.env.MONGODB_URI)
 
 
 
-if (process.env.NODE_ENV === "production") {
+// Telegram bot
+// - Runs in production only (or set TELEGRAM_BOT_ENABLED=false to switch it off).
+// - A bot error must NEVER crash the API server. Telegram allows only ONE running
+//   copy per token; during a Render deploy the old copy is still alive for a few
+//   seconds, which gives "409 Conflict". We wait and try again instead of crashing.
+const telegramEnabled =
+    process.env.NODE_ENV === "production" &&
+    process.env.TELEGRAM_BOT_ENABLED !== "false" &&
+    !!process.env.TELEGRAM_BOT_TOKEN;
+
+if (telegramEnabled) {
     const telegramBot = require("./services/bots/telegramBot");
+    let botAttempts = 0;
 
-    telegramBot.launch();
+    const startBot = () => {
+        botAttempts += 1;
+        telegramBot
+            .launch({ dropPendingUpdates: true })
+            .catch((err) => {
+                const code = err?.response?.error_code;
+                if (code === 409 && botAttempts < 10) {
+                    console.warn(`🤖 Telegram bot: another copy is still running (409). Retrying in 15s... (${botAttempts}/10)`);
+                    setTimeout(startBot, 15000);
+                } else {
+                    console.error("🤖 Telegram bot stopped (server keeps running):", err?.message || err);
+                }
+            });
+    };
 
-    console.log("🤖 Telegram bot started in production");
+    startBot();
+    console.log("🤖 Telegram bot starting in production");
+
+    // Let the old copy stop cleanly when Render replaces it
+    const stopBot = (signal) => {
+        try { telegramBot.stop(signal); } catch { /* not running */ }
+    };
+    process.once("SIGINT", () => stopBot("SIGINT"));
+    process.once("SIGTERM", () => stopBot("SIGTERM"));
 } else {
-    console.log("🤖 Telegram bot disabled in development");
+    console.log("🤖 Telegram bot disabled");
 }
 
 // ===============================
@@ -175,6 +207,7 @@ app.use('/project_profile', require('./route_project/profile'));
 
 // Live classes (BlockHub Live - video classroom powered by LiveKit)
 app.use('/live_class', require('./route_live/liveClass'));
+app.use('/meetings', require('./route_meetings/meetings')); // BlockHub Meetings (admin-hosted calls)
 
 // Emails: verification, preferences, unsubscribe, admin tools
 app.use('/email', require('./route_email/email'));

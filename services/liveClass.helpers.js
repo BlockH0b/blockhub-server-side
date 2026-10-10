@@ -41,7 +41,7 @@ function normaliseCode(input) {
     if (!input || typeof input !== "string") return null;
     let value = input.trim().toLowerCase();
 
-    const fromLink = value.match(/\/class\/([a-z-]+)/);
+    const fromLink = value.match(/\/(?:class|meet)\/([a-z-]+)/);
     if (fromLink) value = fromLink[1];
 
     const letters = value.replace(/[^a-z]/g, "");
