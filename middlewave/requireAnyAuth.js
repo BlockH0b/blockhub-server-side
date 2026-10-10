@@ -15,8 +15,7 @@ const jwt = require("jsonwebtoken");
  * It only proves the caller is signed in. It does not check roles.
  */
 
-const TUTOR_ACCESS_SECRET =
-    process.env.TUTOR_ACCESS_SECRET_KEY || "tutoraccesskey";
+const TUTOR_ACCESS_SECRET = require("../config/secrets").tutorAccessSecret();
 
 function tryVerify(token, secret) {
     if (!token || typeof token !== "string") return null;

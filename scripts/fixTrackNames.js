@@ -27,15 +27,6 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 
-// ===============================
-// DNS Configuration (optional)
-// ===============================
-const dnsPromises = require("node:dns/promises");
-const dns = require("dns");
-dnsPromises.setServers(["1.1.1.1", "8.8.8.8"]);
-dns.setDefaultResultOrder("ipv4first");
-
-
 const { COHORT_TRACKS, normalizeTrack } = require("../config/cohortTracks");
 
 const APPLY = process.argv.includes("--apply");

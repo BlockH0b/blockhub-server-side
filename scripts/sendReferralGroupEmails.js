@@ -39,15 +39,14 @@ dns.setDefaultResultOrder("ipv4first");
 
 // true  = ONLY test email receives the email
 // false = real referred users receive the email
-const TEST_MODE = false;
+// Follows the server setting: EMAIL_TEST_MODE / EMAIL_TEST_RECIPIENTS in .env
+const TEST_MODE = require("../services/email/config").getConfig().testMode;
 
 // ============================================
 // TEST EMAIL
 // ============================================
 
-const TEST_EMAILS = [
-    "danieldaudu65@gmail.com",
-];
+const TEST_EMAILS = require("../services/email/config").getConfig().testRecipients;
 
 // ============================================
 // CAMPAIGN SETTINGS

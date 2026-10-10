@@ -46,11 +46,10 @@ const COHORT = "cohort-1.0";
 // false = ALL Cohort 1.0 registered users receive email
 // -----------------------------------------------------
 
-const TEST_MODE = true;
+// Follows the server setting: EMAIL_TEST_MODE / EMAIL_TEST_RECIPIENTS in .env
+const TEST_MODE = require("../services/email/config").getConfig().testMode;
 
-const TEST_EMAILS = [
-    "danieldaudu65@gmail.com",
-];
+const TEST_EMAILS = require("../services/email/config").getConfig().testRecipients;
 
 // =====================================================
 // DATABASE

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Course = require('../models/Course');
-const verifyTutorToken = require('../functions/verifyTutorToken');
+const verifyTutorToken = require('../middlewave/verifyTutorToken');
 
 // GET tutor stats
 router.get('/tutor_stats', verifyTutorToken, async (req, res) => {

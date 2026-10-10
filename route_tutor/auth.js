@@ -4,11 +4,11 @@ const jwt = require("jsonwebtoken");
 const Tutor = require("../models/Tutor");
 const User = require("../models/user");
 const Course = require("../models/Course");
-const verifyTutorToken = require("../functions/verifyTutorToken");
+const verifyTutorToken = require("../middlewave/verifyTutorToken");
 const sanitizeTutor = require("../utils/sanitizeTutor");
 const sanitizeUser = require("../utils/sanitizeUser");
 
-const TUTOR_ACCESS_SECRET = process.env.TUTOR_ACCESS_SECRET_KEY || "tutoraccesskey";
+const TUTOR_ACCESS_SECRET = require("../config/secrets").tutorAccessSecret();
 
 // Generate tutor code
 function generateTutorCode() {
