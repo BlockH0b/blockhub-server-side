@@ -106,6 +106,18 @@ const cohortClassSchema = new mongoose.Schema(
         },
 
         // ============================================
+        // EMAILS
+        // false = students get NO emails about this class
+        // (new class, 1-hour reminder, time change, cancel,
+        // missed class). Use for test classes.
+        // ============================================
+
+        emailStudents: {
+            type: Boolean,
+            default: true,
+        },
+
+        // ============================================
         // OPTIONAL CLASS METADATA
         // ============================================
 

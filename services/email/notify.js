@@ -166,8 +166,12 @@ function announcementPosted(announcement, tutorUser) {
     }, "notify.announcement");
 }
 
+/** Tutor unticked "Email students" (test class) -> send nothing about it */
+const emailsOff = (classDoc) => classDoc?.emailStudents === false;
+
 function classScheduled(classDoc) {
     safely(async () => {
+        if (emailsOff(classDoc)) return;
         const cls = classInfo(classDoc);
         if (cls.startsAt && cls.startsAt < new Date()) return; // created in the past - skip
         const students = await trackStudents(classDoc.cohort, classDoc.track);
@@ -182,6 +186,7 @@ function classScheduled(classDoc) {
 
 function classUpdated(classDoc, previousStartsAt) {
     safely(async () => {
+        if (emailsOff(classDoc)) return;
         const cls = classInfo(classDoc);
         if (!cls.startsAt || cls.startsAt < new Date()) return;
         const students = await trackStudents(classDoc.cohort, classDoc.track);
@@ -197,6 +202,7 @@ function classUpdated(classDoc, previousStartsAt) {
 
 function classCancelled(classDoc) {
     safely(async () => {
+        if (emailsOff(classDoc)) return;
         const cls = classInfo(classDoc);
         if (cls.startsAt && cls.startsAt < new Date()) return;
         const students = await trackStudents(classDoc.cohort, classDoc.track);
@@ -234,6 +240,8 @@ function classLive(session, tutorName) {
 function missedClass(session) {
     safely(async () => {
         if (!session.cohortClass || !session.startedAt) return;
+        const classDoc = await require("../../models/CohortClass").findById(session.cohortClass).select("emailStudents").lean();
+        if (emailsOff(classDoc)) return;
         const minutes = (new Date(session.endedAt || Date.now()) - new Date(session.startedAt)) / 60000;
         if (minutes < 10) return; // tutor just tested the room
 

@@ -195,6 +195,9 @@ router.get("/dashboard", async (req, res) => {
         meetingStatus:
           classItem.meetingStatus,
 
+        emailStudents:
+          classItem.emailStudents !== false,
+
         status: mapClassStatus(
           classItem
         ),
@@ -545,6 +548,9 @@ router.post("/classes", async (req, res) => {
             : "pending",
 
         status: "scheduled",
+
+        // Untick "Email students" for test classes -> no emails at all
+        emailStudents: req.body?.emailStudents !== false,
       });
 
     notify.classScheduled(newClass);
@@ -615,7 +621,12 @@ const updateClassHandler = async (req, res) => {
       durationMinutes,
       meetingLink,
       status,
+      emailStudents,
     } = req.body;
+
+    if (typeof emailStudents === "boolean") {
+      classItem.emailStudents = emailStudents;
+    }
 
     // remember the old time/status so we can email students about changes
     const previousStartsAt = getClassStartsAt(classItem);

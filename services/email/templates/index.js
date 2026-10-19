@@ -73,7 +73,7 @@ const T = {
                 { title: "Marketplace", subtitle: "Buy and sell digital products." },
             ]) +
             button("Explore BlockHub", ctx.frontendUrl) +
-            (ctx.communityLink ? small(`Join the community: <a href="${esc(ctx.communityLink)}" style="color:#48FF75">${esc(ctx.communityLink)}</a>`) : ""),
+            (ctx.communityLink ? small(`Join the community: <a href="${esc(ctx.communityLink)}" style="color:#0a0a0a;text-decoration:underline">${esc(ctx.communityLink)}</a>`) : ""),
         text: `Welcome to BlockHub! ${ctx.frontendUrl}`,
     }),
 
@@ -161,7 +161,7 @@ const T = {
         html:
             eyebrow(`${track} · Reminder`) +
             h1(`Your class starts in 1 hour`) +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(cls.title)}</strong> starts at ${esc(fmtTime(cls.startsAt))}.`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(cls.title)}</strong> starts at ${esc(fmtTime(cls.startsAt))}.`) +
             details([
                 ["Date", fmtDate(cls.startsAt)],
                 ["Time", fmtTime(cls.startsAt)],
@@ -189,7 +189,7 @@ const T = {
         html:
             eyebrow(`${track} · Catch up`) +
             h1(`We missed you today`) +
-            p(`Hi ${esc(first(name))}, you weren't in <strong style="color:#fff">${esc(title)}</strong> (${esc(fmtDate(endedAt))}). No stress — check your dashboard for the curriculum and the next class so you don't fall behind.`) +
+            p(`Hi ${esc(first(name))}, you weren't in <strong style="color:#0a0a0a">${esc(title)}</strong> (${esc(fmtDate(endedAt))}). No stress — check your dashboard for the curriculum and the next class so you don't fall behind.`) +
             button("See what's next", `${ctx.frontendUrl}/cohort/my-dashboard`),
         text: `You missed ${title}. Catch up: ${ctx.frontendUrl}/cohort/my-dashboard`,
     }),
@@ -200,7 +200,7 @@ const T = {
         html:
             eyebrow("Cohort tutor") +
             h1(`Welcome aboard, ${first(name)}!`) +
-            p(`You've been made a tutor for the <strong style="color:#fff">${esc(track)}</strong> track.`) +
+            p(`You've been made a tutor for the <strong style="color:#0a0a0a">${esc(track)}</strong> track.`) +
             details([
                 ["Track", track],
                 ["Tutor code", tutorCode],
@@ -216,7 +216,7 @@ const T = {
         html:
             eyebrow("Track updated") +
             h1(`Welcome to ${track}`) +
-            p(`Hi ${esc(first(name))}, your cohort track has been switched. Your classes, tutor and announcements now come from <strong style="color:#fff">${esc(track)}</strong>.`) +
+            p(`Hi ${esc(first(name))}, your cohort track has been switched. Your classes, tutor and announcements now come from <strong style="color:#0a0a0a">${esc(track)}</strong>.`) +
             button("Open my dashboard", `${ctx.frontendUrl}/cohort/my-dashboard`),
         text: `Your track is now ${track}.`,
     }),
@@ -228,11 +228,11 @@ const T = {
             eyebrow(`${track} · Weekly`) +
             h1(`Your week ahead, ${first(name)}`) +
             (classes.length
-                ? p("<strong style='color:#fff'>Classes this week</strong>") +
+                ? p("<strong style='color:#0a0a0a'>Classes this week</strong>") +
                 itemList(classes.map((c) => ({ title: c.title, subtitle: `${fmtDate(c.startsAt)} · ${fmtTime(c.startsAt)}` })))
                 : p("No classes are scheduled this week yet.")) +
             (announcements.length
-                ? p("<strong style='color:#fff'>New announcements</strong>") +
+                ? p("<strong style='color:#0a0a0a'>New announcements</strong>") +
                 itemList(announcements.map((a) => ({ title: a.title, subtitle: String(a.message || "").slice(0, 120) })))
                 : "") +
             button("Open my dashboard", `${ctx.frontendUrl}/cohort/my-dashboard`),
@@ -249,7 +249,7 @@ const T = {
         html:
             eyebrow("GrindFi · Joined") +
             h1(`You're in, ${first(name)}!`) +
-            p(`You've joined <strong style="color:#fff">${esc(campaign.title)}</strong>. Complete the tasks to earn your reward.`) +
+            p(`You've joined <strong style="color:#0a0a0a">${esc(campaign.title)}</strong>. Complete the tasks to earn your reward.`) +
             details([
                 ["Tasks", totalTasks],
                 ["Reward", campaign.rewardText],
@@ -265,7 +265,7 @@ const T = {
         html:
             eyebrow("GrindFi · Submitted") +
             h1("We got your submission ✅") +
-            p(`Hi ${esc(first(name))}, your submission for <strong style="color:#fff">${esc(taskTitle || "a task")}</strong> in ${esc(campaign.title)} has been received.`) +
+            p(`Hi ${esc(first(name))}, your submission for <strong style="color:#0a0a0a">${esc(taskTitle || "a task")}</strong> in ${esc(campaign.title)} has been received.`) +
             button("View campaign", `${ctx.frontendUrl}/grindfi/${campaign.slug}`),
         text: `Submission received for ${campaign.title}.`,
     }),
@@ -292,7 +292,7 @@ const T = {
         html:
             eyebrow("GrindFi · Ending soon") +
             h1("Less than 24 hours left") +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(campaign.title)}</strong> ends ${esc(fmtDate(campaign.endDate))} at ${esc(fmtTime(campaign.endDate))}. You still have <strong style="color:#48FF75">${remainingTasks}</strong> task${remainingTasks === 1 ? "" : "s"} to finish.`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(campaign.title)}</strong> ends ${esc(fmtDate(campaign.endDate))} at ${esc(fmtTime(campaign.endDate))}. You still have <strong style="color:#0b8f3a">${remainingTasks}</strong> task${remainingTasks === 1 ? "" : "s"} to finish.`) +
             button("Finish my tasks", `${ctx.frontendUrl}/grindfi/${campaign.slug}`),
         text: `${campaign.title} ends in 24h. ${remainingTasks} tasks left.`,
     }),
@@ -303,7 +303,7 @@ const T = {
         html:
             eyebrow("GrindFi · Ended") +
             h1("Campaign ended") +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(campaign.title)}</strong> has ended. Thanks for taking part!`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(campaign.title)}</strong> has ended. Thanks for taking part!`) +
             details([
                 ["Your tasks", `${completedTasks} of ${totalTasks}`],
                 ["Reward", campaign.rewardText],
@@ -339,7 +339,7 @@ const T = {
         html:
             eyebrow("Academy · Enrolled") +
             h1(`Let's learn, ${first(name)}!`) +
-            p(`You're now enrolled in <strong style="color:#fff">${esc(course.name)}</strong>.`) +
+            p(`You're now enrolled in <strong style="color:#0a0a0a">${esc(course.name)}</strong>.`) +
             details([
                 ["Lessons", course.lessonCount],
                 ["Level", course.level],
@@ -354,7 +354,7 @@ const T = {
         html:
             eyebrow("Academy · Completed") +
             h1(`Congratulations, ${first(name)}!`) +
-            p(`You've completed <strong style="color:#fff">${esc(course.name)}</strong>. Your certificate is ready to download and share.`) +
+            p(`You've completed <strong style="color:#0a0a0a">${esc(course.name)}</strong>. Your certificate is ready to download and share.`) +
             button("Download my certificate", certificateUrl || `${ctx.frontendUrl}/dashboard`) +
             small("Share it on X or LinkedIn and tag @BlockHub — we love to see it."),
         text: `You completed ${course.name}. Certificate: ${certificateUrl}`,
@@ -383,7 +383,7 @@ const T = {
             html:
                 eyebrow(`Academy · ${approved ? "Approved" : "Not approved"}`) +
                 h1(approved ? "Your course was approved 🎉" : "Your course needs changes") +
-                p(`Hi ${esc(first(name))}, your submission <strong style="color:#fff">${esc(courseTitle)}</strong> was ${approved ? "approved" : "not approved yet"}.`) +
+                p(`Hi ${esc(first(name))}, your submission <strong style="color:#0a0a0a">${esc(courseTitle)}</strong> was ${approved ? "approved" : "not approved yet"}.`) +
                 (reason ? quote(textToHtml(reason), approved ? "#48FF75" : "#f59e0b") : "") +
                 button("Open course management", `${ctx.frontendUrl}/dashboard/course-management`),
             text: `${courseTitle}: ${status}. ${reason || ""}`,
@@ -396,7 +396,7 @@ const T = {
         html:
             eyebrow("Academy · Keep going") +
             h1(`You're ${progress}% there`) +
-            p(`Hi ${esc(first(name))}, it's been a week since you last opened <strong style="color:#fff">${esc(course.name)}</strong>. A few minutes today keeps the momentum going.`) +
+            p(`Hi ${esc(first(name))}, it's been a week since you last opened <strong style="color:#0a0a0a">${esc(course.name)}</strong>. A few minutes today keeps the momentum going.`) +
             button("Continue the course", `${ctx.frontendUrl}/dashboard/course/${course.id}`),
         text: `Continue ${course.name}: ${ctx.frontendUrl}/dashboard/course/${course.id}`,
     }),
@@ -428,7 +428,7 @@ const T = {
         html:
             eyebrow(currency === "FREE" ? "Claimed" : "Payment confirmed") +
             h1("Your product is ready 🎉") +
-            p(`Hi ${esc(first(name))}, you can access <strong style="color:#fff">${esc(product.title)}</strong> any time from your purchases.`) +
+            p(`Hi ${esc(first(name))}, you can access <strong style="color:#0a0a0a">${esc(product.title)}</strong> any time from your purchases.`) +
             details([
                 ["Product", product.title],
                 ["Amount", fmtMoney(amount, currency)],
@@ -445,7 +445,7 @@ const T = {
         html:
             eyebrow("New sale") +
             h1(`Nice one, ${first(name)}!`) +
-            p(`Someone just bought your ${esc(itemKind)} <strong style="color:#fff">${esc(itemName)}</strong>.`) +
+            p(`Someone just bought your ${esc(itemKind)} <strong style="color:#0a0a0a">${esc(itemName)}</strong>.`) +
             details([
                 ["Sale price", fmtMoney(amount, currency)],
                 ["Your earning", fmtMoney(earning, currency)],
@@ -460,7 +460,7 @@ const T = {
         html:
             eyebrow("Payment failed") +
             h1("Your payment didn't go through") +
-            p(`Hi ${esc(first(name))}, we couldn't complete your payment for <strong style="color:#fff">${esc(itemName)}</strong>. If you were debited, it will be reversed by your bank — or reply to this email and we'll help.`) +
+            p(`Hi ${esc(first(name))}, we couldn't complete your payment for <strong style="color:#0a0a0a">${esc(itemName)}</strong>. If you were debited, it will be reversed by your bank — or reply to this email and we'll help.`) +
             button("Try again", retryUrl),
         text: `Payment for ${itemName} failed. Try again: ${retryUrl}`,
     }),
@@ -471,7 +471,7 @@ const T = {
         html:
             eyebrow("Marketplace · Published") +
             h1("Your product is live 🚀") +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(product.title)}</strong> is now on the BlockHub Marketplace.`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(product.title)}</strong> is now on the BlockHub Marketplace.`) +
             details([["Link", `${ctx.frontendUrl}/market/${product.slug}`]]) +
             button("View product", `${ctx.frontendUrl}/market/${product.slug}`),
         text: `Your product is live: ${ctx.frontendUrl}/market/${product.slug}`,
@@ -487,7 +487,7 @@ const T = {
         html:
             eyebrow("Referrals") +
             h1("Your referral worked!") +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(referredName || "a new member")}</strong> just signed up with your code.`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(referredName || "a new member")}</strong> just signed up with your code.`) +
             details([["Total referrals", totalReferrals]]) +
             button("View my referrals", `${ctx.frontendUrl}/referral-dashboard`),
         text: `${referredName} used your referral code. Total: ${totalReferrals}`,
@@ -527,7 +527,7 @@ const T = {
             ]) +
             (meeting.description ? p(textToHtml(String(meeting.description).slice(0, 800))) : "") +
             button("Accept invite", acceptUrl) +
-            small(`Accepting books your spot and adds the meeting to your calendar. Can't make it? <a href="${esc(declineUrl)}" style="color:#48FF75">Decline</a>.`),
+            small(`Accepting books your spot and adds the meeting to your calendar. Can't make it? <a href="${esc(declineUrl)}" style="color:#0a0a0a;text-decoration:underline">Decline</a>.`),
         text: `You're invited to ${meeting.title} on ${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. Accept: ${acceptUrl}`,
     }),
 
@@ -537,7 +537,7 @@ const T = {
         html:
             eyebrow("BlockHub Meeting · Confirmed") +
             h1(`You're in, ${first(name)}!`) +
-            p(`Your spot for <strong style="color:#fff">${esc(meeting.title)}</strong> is booked. We've attached a calendar invite, so it should show up in your calendar automatically.`) +
+            p(`Your spot for <strong style="color:#0a0a0a">${esc(meeting.title)}</strong> is booked. We've attached a calendar invite, so it should show up in your calendar automatically.`) +
             details([
                 ["Date", fmtDate(meeting.startsAt)],
                 ["Time", fmtTime(meeting.startsAt)],
@@ -552,7 +552,7 @@ const T = {
                 ["Outlook", links?.outlook],
                 ["Apple / other (.ics)", links?.ics],
             ]) +
-            small(`We'll remind you 1 hour before it starts. Can't make it anymore? <a href="${esc(declineUrl)}" style="color:#48FF75">Cancel my spot</a>.`),
+            small(`We'll remind you 1 hour before it starts. Can't make it anymore? <a href="${esc(declineUrl)}" style="color:#0a0a0a;text-decoration:underline">Cancel my spot</a>.`),
         text: `You're booked for ${meeting.title} on ${fmtDate(meeting.startsAt)} at ${fmtTime(meeting.startsAt)}. Join: ${joinUrl}`,
     }),
 
@@ -562,7 +562,7 @@ const T = {
         html:
             eyebrow("BlockHub Meeting") +
             h1("Your spot is cancelled") +
-            p(`Hi ${esc(first(name))}, you won't be attending <strong style="color:#fff">${esc(meeting.title)}</strong> (${esc(fmtDate(meeting.startsAt))}). We've removed it from your calendar.`) +
+            p(`Hi ${esc(first(name))}, you won't be attending <strong style="color:#0a0a0a">${esc(meeting.title)}</strong> (${esc(fmtDate(meeting.startsAt))}). We've removed it from your calendar.`) +
             button("Changed your mind? Book again", joinUrl),
         text: `Your spot for ${meeting.title} is cancelled. Book again: ${joinUrl}`,
     }),
@@ -610,7 +610,7 @@ const T = {
         html:
             eyebrow("BlockHub Meeting · Reminder") +
             h1("Your meeting starts in 1 hour") +
-            p(`Hi ${esc(first(name))}, <strong style="color:#fff">${esc(meeting.title)}</strong> starts at ${esc(fmtTime(meeting.startsAt))}.`) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(meeting.title)}</strong> starts at ${esc(fmtTime(meeting.startsAt))}.`) +
             details([
                 ["Date", fmtDate(meeting.startsAt)],
                 ["Time", fmtTime(meeting.startsAt)],

@@ -59,6 +59,7 @@ async function classReminders() {
     // startDate is stored as a calendar date, so look at yesterday..tomorrow
     const classes = await M.CohortClass.find({
         status: { $in: ["scheduled", "ongoing"] },
+        emailStudents: { $ne: false }, // tutor turned emails off (test class)
         startDate: { $gte: new Date(now - 2 * DAY), $lte: new Date(now + 2 * DAY) },
     }).lean();
 
@@ -109,6 +110,7 @@ async function weeklyDigest() {
                 cohort: group.cohort,
                 track: group.track,
                 status: { $in: ["scheduled", "ongoing"] },
+                emailStudents: { $ne: false },
                 startDate: { $gte: new Date(now - DAY), $lte: new Date(now + 8 * DAY) },
             })
                 .sort({ startDate: 1 })

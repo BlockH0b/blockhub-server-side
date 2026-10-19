@@ -672,8 +672,9 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
                     const meeting = await Meeting.findById(session.meeting);
                     // "We're live" email to people who RSVP'd
                     if (meeting) meetingNotify.live(meeting, session);
-                } else {
-                    // "Your class is live" email to the track (once per session)
+                } else if (req.body?.notifyStudents === true) {
+                    // "Your class is live" email to the track - ONLY when the
+                    // tutor ticks "Email students" on the start screen
                     notify.classLive(session, viewer.name);
                 }
 
