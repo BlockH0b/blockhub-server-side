@@ -1,6 +1,7 @@
 const CohortAccessToken = require("../models/CohortAccessToken");
 const createCohortAccessToken = require("./createCohortAccessToken");
 const notify = require("../services/email/notify");
+const { getConfig } = require("../services/email/config");
 
 /*
  * Email a one-time cohort dashboard login link.
@@ -22,7 +23,8 @@ async function sendCohortLoginLink(user, registration) {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    const apiBase = (process.env.SERVER_URL || process.env.API_URL || "").replace(/\/$/, "");
+    // Same API address the email service uses (SERVER_URL / API_URL, else the live API)
+    const apiBase = getConfig().apiUrl;
     const url = `${apiBase}/user_userCohort/access/${token}`;
 
     return notify.cohortLoginLink({

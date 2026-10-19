@@ -208,6 +208,7 @@ app.use('/project_profile', require('./route_project/profile'));
 // Live classes (BlockHub Live - video classroom powered by LiveKit)
 app.use('/live_class', require('./route_live/liveClass'));
 app.use('/meetings', require('./route_meetings/meetings')); // BlockHub Meetings (admin-hosted calls)
+app.use('/share', require('./route_share/share')); // link previews for the website (WhatsApp, X...)
 
 // Emails: verification, preferences, unsubscribe, admin tools
 app.use('/email', require('./route_email/email'));

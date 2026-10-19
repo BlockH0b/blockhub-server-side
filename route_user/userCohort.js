@@ -640,14 +640,22 @@ router.get(
     }
 );
 
+/*
+ * Login-link problems (expired, already used, invalid...) send the
+ * student to the cohort login page with a friendly message and a
+ * "send me a new link" form, instead of a plain-text error page.
+ */
+function failLink(res, reason) {
+    const frontend = (process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, "");
+    return res.redirect(`${frontend}/cohort/login?link=${encodeURIComponent(reason)}`);
+}
+
 router.get("/access/:token", async (req, res) => {
     try {
         const { token } = req.params;
 
         if (!token) {
-            return res.status(400).send(
-                "Invalid cohort access link."
-            );
+            return failLink(res, "invalid");
         }
 
         // 1. Verify the temporary email token
@@ -662,9 +670,7 @@ router.get("/access/:token", async (req, res) => {
             decoded.purpose !==
             "cohort_email_access"
         ) {
-            return res.status(401).send(
-                "Invalid cohort access link."
-            );
+            return failLink(res, "invalid");
         }
 
         if (
@@ -673,9 +679,7 @@ router.get("/access/:token", async (req, res) => {
             !decoded.cohort ||
             !decoded.jti
         ) {
-            return res.status(401).send(
-                "Invalid cohort access link."
-            );
+            return failLink(res, "invalid");
         }
 
         // 3. Find the temporary access-token record
@@ -688,16 +692,12 @@ router.get("/access/:token", async (req, res) => {
             });
 
         if (!accessRecord) {
-            return res.status(401).send(
-                "This cohort access link is invalid or no longer available."
-            );
+            return failLink(res, "invalid");
         }
 
         // 4. Prevent reuse
         if (accessRecord.used) {
-            return res.status(401).send(
-                "This cohort access link has already been used. Please request a new one."
-            );
+            return failLink(res, "used");
         }
 
         // 5. Check expiration
@@ -705,9 +705,7 @@ router.get("/access/:token", async (req, res) => {
             accessRecord.expiresAt.getTime() <
             Date.now()
         ) {
-            return res.status(401).send(
-                "This cohort access link has expired. Please request a new one."
-            );
+            return failLink(res, "expired");
         }
 
         // 6. Confirm user still exists
@@ -716,9 +714,7 @@ router.get("/access/:token", async (req, res) => {
         );
 
         if (!user) {
-            return res.status(404).send(
-                "User account not found."
-            );
+            return failLink(res, "invalid");
         }
 
         // 7. Confirm registration still exists
@@ -730,16 +726,12 @@ router.get("/access/:token", async (req, res) => {
             });
 
         if (!registration) {
-            return res.status(404).send(
-                "Cohort registration not found."
-            );
+            return failLink(res, "invalid");
         }
 
         // 8. Block rejected users
         if (registration.status === "rejected") {
-            return res.status(403).send(
-                "Your cohort registration has been rejected."
-            );
+            return failLink(res, "rejected");
         }
 
         // 9. Mark temporary access token as used
@@ -783,7 +775,7 @@ router.get("/access/:token", async (req, res) => {
 
         // 12. Send user to dashboard
         return res.redirect(
-            `${process.env.FRONTEND_URL}/cohort/my-dashboard`
+            `${(process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, "")}/cohort/my-dashboard`
         );
     } catch (error) {
         console.error(
@@ -795,23 +787,17 @@ router.get("/access/:token", async (req, res) => {
             error.name ===
             "TokenExpiredError"
         ) {
-            return res.status(401).send(
-                "This cohort access link has expired. Please request a new one."
-            );
+            return failLink(res, "expired");
         }
 
         if (
             error.name ===
             "JsonWebTokenError"
         ) {
-            return res.status(401).send(
-                "Invalid cohort access link."
-            );
+            return failLink(res, "invalid");
         }
 
-        return res.status(500).send(
-            "Something went wrong while accessing your cohort dashboard."
-        );
+        return failLink(res, "error");
     }
 });
 

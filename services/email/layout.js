@@ -9,7 +9,7 @@ const { getConfig } = require("./config");
  */
 
 const C = {
-    page: "#f4f4f1",      // outside the card
+    page: "#ffffff",      // whole email background (plain white, no grey frame)
     card: "#ffffff",
     border: "#e9e9e6",
     line: "#efefec",
@@ -60,13 +60,14 @@ const small = (html) =>
 const eyebrow = (text) =>
     `<p style="margin:0 0 12px;font:700 11px/1 ${FONT};color:${C.greenText};letter-spacing:1.6px;text-transform:uppercase">${esc(text)}</p>`;
 
-/** Solid black button */
+/** Dark green -> black gradient button (Outlook shows the solid dark green fallback) */
 function button(label, url) {
+    const gradient = "linear-gradient(90deg,#0f8a3c 0%,#0b5a28 45%,#060606 100%)";
     return `
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0 10px">
-  <tr><td style="border-radius:10px;background:${C.ink}">
+  <tr><td bgcolor="#0b5a28" style="border-radius:12px;background-color:#0b5a28;background-image:${gradient};box-shadow:0 6px 18px rgba(11,90,40,.25)">
     <a href="${esc(url)}" target="_blank"
-       style="display:inline-block;padding:14px 24px;font:600 14px/1 ${FONT};color:#ffffff;text-decoration:none;border-radius:10px">
+       style="display:inline-block;padding:14px 28px;font:700 14px/1 ${FONT};color:#ffffff;text-decoration:none;border-radius:12px">
        ${esc(label)} &nbsp;&rarr;
     </a>
   </td></tr>
@@ -185,26 +186,26 @@ function layout(content, opts = {}) {
 <body style="margin:0;padding:0;background:${C.page};-webkit-text-size-adjust:100%">
 <span style="display:none!important;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;mso-hide:all">${esc(opts.preheader || "")}</span>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:${C.page}">
-  <tr><td align="center" style="padding:36px 14px">
+  <tr><td align="center" style="padding:20px 6px">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
-           style="max-width:560px;background:${C.card};border:1px solid ${C.border};border-radius:16px;border-collapse:separate;overflow:hidden">
+           style="max-width:560px;background:${C.card};border-collapse:separate">
 
-      <tr><td style="height:4px;line-height:4px;font-size:0;background:${C.green}">&nbsp;</td></tr>
+      <tr><td style="padding:0 24px"><div style="height:4px;line-height:4px;font-size:0;background:${C.green};border-radius:4px">&nbsp;</div></td></tr>
       ${banner}
 
-      <tr><td style="padding:28px 32px 0">
+      <tr><td style="padding:24px 24px 0">
         <span style="font:800 17px/1 ${FONT};color:${C.ink};letter-spacing:-0.3px">BlockHub<span style="color:${C.green}">.</span></span>
       </td></tr>
 
-      <tr><td style="padding:26px 32px 30px">
+      <tr><td style="padding:24px 24px 28px">
         ${content}
       </td></tr>
 
-      <tr><td style="padding:18px 32px 22px;border-top:1px solid ${C.line};font:400 12px/1.7 ${FONT};color:${C.faint}">
+      <tr><td style="padding:0 24px 22px"><div style="padding-top:18px;border-top:1px solid ${C.line};font:400 12px/1.7 ${FONT};color:${C.faint}">
         ${opts.footerNote ? `${esc(opts.footerNote)}<br/>` : ""}
         ${links}
         <br/>© ${year} BlockHub · Learn, build and grow in Web3.
-      </td></tr>
+</div>      </td></tr>
 
     </table>
   </td></tr>
