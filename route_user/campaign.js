@@ -728,6 +728,89 @@ router.get("/submissions/:campaignId", auth, async (req, res) => {
     }
 });
 
+
+router.post("/submissions/:submissionId/review", auth, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { submissionId } = req.params;
+        const { status, reviewNote = "" } = req.body;
+
+        // Validate the review decision
+        if (!["approved", "rejected"].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Status must be approved or rejected.",
+            });
+        }
+
+        // Find the submission
+        const submission = await CampaignSubmission.findById(submissionId);
+
+        if (!submission) {
+            return res.status(404).json({
+                success: false,
+                message: "Submission not found.",
+            });
+        }
+
+        // Verify campaign ownership
+        const campaign = await Campaign.findById(submission.campaign);
+
+        if (!campaign) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found.",
+            });
+        }
+
+        if (campaign.owner.toString() !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to review this submission.",
+            });
+        }
+
+        // Prevent accidentally reviewing a submission twice
+        if (submission.status !== "pending") {
+            return res.status(400).json({
+                success: false,
+                message: `This submission has already been ${submission.status}.`,
+            });
+        }
+
+        // Save the review
+        submission.status = status;
+        submission.reviewedBy = userId;
+        submission.reviewedAt = new Date();
+        submission.reviewNote = String(reviewNote).trim();
+
+        await submission.save();
+
+        // Return the updated submission with related details
+        const updatedSubmission = await CampaignSubmission.findById(
+            submission._id
+        )
+            .populate("user", "firstName lastName username email profileImage avatar")
+            .populate("task", "title type reward")
+            .populate("participant")
+            .populate("reviewedBy", "firstName lastName username");
+
+        return res.json({
+            success: true,
+            message: `Submission ${status} successfully.`,
+            submission: updatedSubmission,
+        });
+    } catch (error) {
+        console.error("Review Submission Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to review submission.",
+        });
+    }
+});
+
+
 router.post("/join/:campaignId", auth, async (req, res) => {
     try {
         const userId = req.user.id;
