@@ -54,6 +54,23 @@ module.exports = {
             });
 
 
+            // BlockHub Live (YouTube classes): join a class's question room.
+            // The ticket is signed by the server when the student opens the class.
+            socket.on('yt:join', (payload) => {
+                try {
+                    const { verifyTicket } = require('../services/youtube.service');
+                    const decoded = verifyTicket(payload && payload.ticket);
+                    if (!decoded || !decoded.code) return;
+                    socket.join(`yt:${decoded.code}`);
+                } catch (err) {
+                    console.error('yt:join error:', err.message);
+                }
+            });
+
+            socket.on('yt:leave', (payload) => {
+                if (payload && typeof payload.code === 'string') socket.leave(`yt:${payload.code}`);
+            });
+
             socket.on('disconnect', () => {
                 console.log('User disconnected:', socket.id);
             });

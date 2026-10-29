@@ -3,8 +3,9 @@
  * BlockHub Live  -  /live_class
  * ==================================================================
  * Google-Meet-style video classes for cohort tutors and students.
- * Video/audio/screen-share run on LiveKit; everything about WHO can
- * join WHICH class lives here.
+ * Video/audio/screen-share run on LiveKit (or, when a class's provider is
+ * "youtube", on YouTube Live with BlockHub questions beside it);
+ * everything about WHO can join WHICH class lives here.
  *
  *  TUTOR (host)
  *    POST   /sessions                          create / reuse a class call
@@ -63,6 +64,10 @@ const { liveClassAuth, requireHost } = require("../middlewave/liveClassAuth");
 const notify = require("../services/email/notify");
 const Meeting = require("../models/Meeting");
 const meetingNotify = require("../services/meetings/notify");
+const youtube = require("../services/youtube.service");
+const LiveQuestion = require("../models/LiveQuestion");
+const LiveSetting = require("../models/LiveSetting");
+const { getIO } = require("../confiq/socket");
 
 /* ==================================================================
    WEBHOOK  (must be registered before JSON-only handlers)
@@ -155,6 +160,76 @@ router.post(
 );
 
 /* ==================================================================
+   YOUTUBE HELPERS  (function declarations, so they can be used above)
+================================================================== */
+
+const QUESTION_MAX = 300;
+
+/** Sends a socket event to everyone watching this class */
+function emitToSession(code, event, payload) {
+    try {
+        getIO().to(`yt:${code}`).emit(event, payload);
+    } catch {
+        /* socket server not ready - clients will catch up on refresh */
+    }
+}
+
+/** The video system new classes use (admin setting). Defaults to LiveKit. */
+async function getDefaultProvider() {
+    const row = await LiveSetting.findOne({ key: "liveProvider" }).lean();
+    return row?.value?.defaultProvider === "youtube" ? "youtube" : "livekit";
+}
+
+/**
+ * Works out the YouTube details for a new class:
+ *  - a pasted link wins (manual)
+ *  - else, if the channel is connected, create the live event (auto)
+ *  - else leave it empty with a friendly message; the tutor can paste a link later
+ * Never throws - a YouTube problem must not stop the class being created.
+ */
+async function prepareYoutube({ title, classItem, videoUrl }) {
+    const result = {
+        videoId: null,
+        broadcastId: null,
+        streamId: null,
+        ingestUrl: null,
+        streamKey: null,
+        source: null,
+        error: null,
+    };
+
+    if (videoUrl) {
+        const id = youtube.parseVideoId(videoUrl);
+        if (!id) {
+            result.error = "That doesn't look like a YouTube link.";
+            return result;
+        }
+        result.videoId = id;
+        result.source = "manual";
+        return result;
+    }
+
+    if (!(await youtube.isConnected())) {
+        result.error =
+            "YouTube isn't connected yet. Paste your YouTube live link below, or ask an admin to connect YouTube.";
+        return result;
+    }
+
+    try {
+        const live = await youtube.createLiveEvent({
+            title,
+            startsAt: classItem ? getClassStartsAt(classItem) : null,
+        });
+        Object.assign(result, live, { source: "auto" });
+    } catch (error) {
+        console.error("[live_class] youtube create event failed:", error.message);
+        result.error = error.message;
+    }
+
+    return result;
+}
+
+/* ==================================================================
    HELPERS
 ================================================================== */
 
@@ -227,7 +302,13 @@ async function endSession(session) {
         );
     }
 
-    if (livekit.isConfigured()) await livekit.closeRoom(session.roomName);
+    if (session.provider === "youtube") {
+        // Stop the YouTube broadcast (best effort) and tell everyone watching
+        youtube.completeBroadcast(session.youtube?.broadcastId).catch(() => { });
+        emitToSession(session.code, "yt:session", { status: "ended" });
+    } else if (livekit.isConfigured()) {
+        await livekit.closeRoom(session.roomName);
+    }
     await closeAllVisits(session._id);
 
     if (isMeeting(session)) {
@@ -282,6 +363,7 @@ async function toSessionDTO(session, viewer) {
         cohort: session.cohort,
         track: session.track,
         status: session.status,
+        provider: session.provider || "livekit",
         settings: {
             waitingRoom: Boolean(session.settings?.waitingRoom),
             allowStudentScreenShare: Boolean(session.settings?.allowStudentScreenShare),
@@ -298,6 +380,13 @@ async function toSessionDTO(session, viewer) {
         },
     };
 
+    if (session.provider === "youtube") {
+        dto.youtube = {
+            videoId: session.youtube?.videoId || null,
+            source: session.youtube?.source || null,
+        };
+    }
+
     if (viewer) {
         dto.viewer = {
             userId: viewer.userId,
@@ -308,6 +397,7 @@ async function toSessionDTO(session, viewer) {
 
         if (dto.viewer.role === "host") {
             dto.waitingCount = (session.lobby || []).filter((e) => e.status === "waiting").length;
+            if (dto.youtube) dto.youtube.error = session.youtube?.error || null;
         }
     }
 
@@ -421,6 +511,26 @@ function validIdentity(identity) {
    ALL ROUTES BELOW NEED A SIGNED-IN TUTOR, ADMIN OR STUDENT
 ================================================================== */
 
+/* ------------------------------------------------------------------
+   YOUTUBE CONNECT CALLBACK        GET /youtube/callback
+   Google sends the admin's browser back here. No login needed: the
+   signed "state" proves the admin started it.
+------------------------------------------------------------------ */
+
+router.get("/youtube/callback", async (req, res) => {
+    const front = (process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, "");
+    try {
+        if (req.query.error) throw new Error(`Google said: ${String(req.query.error)}`);
+        await youtube.handleCallback(String(req.query.code || ""), String(req.query.state || ""));
+        return res.redirect(`${front}/admin?youtube=connected`);
+    } catch (error) {
+        console.error("[live_class] youtube callback:", error.message);
+        return res.redirect(
+            `${front}/admin?youtube=error&reason=${encodeURIComponent(String(error.message).slice(0, 160))}`
+        );
+    }
+});
+
 router.use(liveClassAuth);
 
 /* ------------------------------------------------------------------
@@ -494,11 +604,28 @@ router.post("/sessions", requireHost, async (req, res) => {
             });
         }
 
+        // Which video system? An explicit choice wins, else the admin default.
+        const provider = ["livekit", "youtube"].includes(req.body?.provider)
+            ? req.body.provider
+            : await getDefaultProvider();
+
+        const finalTitle =
+            (typeof title === "string" && title.trim().slice(0, 140)) ||
+            classItem?.title ||
+            `${track} live class`;
+
+        const yt =
+            provider === "youtube"
+                ? await prepareYoutube({ title: finalTitle, classItem, videoUrl: req.body?.youtubeUrl })
+                : null;
+
         const code = await generateUniqueCode();
 
         const session = await LiveSession.create({
             code,
             roomName: `bh-${code}`,
+            provider,
+            ...(yt ? { youtube: yt } : {}),
             title:
                 (typeof title === "string" && title.trim().slice(0, 140)) ||
                 classItem?.title ||
@@ -647,6 +774,14 @@ router.post("/sessions/:code/token", requireLiveKit, async (req, res) => {
     try {
         const session = await loadSession(req, res);
         if (!session) return;
+
+        if (session.provider === "youtube") {
+            return res.status(409).json({
+                success: false,
+                code: "WRONG_PROVIDER",
+                message: "This class is on YouTube. Open it from the class page.",
+            });
+        }
 
         const viewer = req.viewer;
         const isHost = hostCanManage(viewer, session);
@@ -1232,6 +1367,472 @@ router.get("/sessions/:code/attendance", requireHost, async (req, res) => {
     } catch (error) {
         console.error("attendance error:", error);
         return res.status(500).json({ success: false, message: "Unable to load attendance." });
+    }
+});
+
+/* ==================================================================
+   YOUTUBE CLASSES  (provider: "youtube")
+   ------------------------------------------------------------------
+   One-way YouTube Live video, with BlockHub questions beside it.
+
+   ADMIN
+     GET    /provider-settings            default provider + YouTube status
+     PATCH  /provider-settings            { defaultProvider }
+     GET    /youtube/connect-url          start connecting the channel
+     POST   /youtube/disconnect
+   TUTOR (host)
+     POST   /sessions/:code/youtube/start     mark the class live
+     PATCH  /sessions/:code/youtube/video     paste / replace the YouTube link
+     POST   /sessions/:code/youtube/retry     try creating the YouTube event again
+     PATCH  /sessions/:code/questions/:id     pin / mark answered
+   EVERYONE
+     POST   /sessions/:code/youtube/join      open the class (attendance + socket ticket)
+     POST   /sessions/:code/youtube/leave
+     GET    /sessions/:code/questions
+     POST   /sessions/:code/questions
+     POST   /sessions/:code/questions/:id/upvote
+     DELETE /sessions/:code/questions/:id     host, or the person who asked
+================================================================== */
+
+function requireAdmin(req, res, next) {
+    if (req.viewer?.kind !== "admin") {
+        return res.status(403).json({ success: false, message: "Only admins can do this." });
+    }
+    next();
+}
+
+const isYoutube = (session) => session?.provider === "youtube";
+
+function requireYoutubeSession(session, res) {
+    if (isYoutube(session)) return true;
+    res.status(400).json({
+        success: false,
+        code: "WRONG_PROVIDER",
+        message: "This class doesn't use YouTube.",
+    });
+    return false;
+}
+
+function applyYoutube(session, y) {
+    session.youtube.videoId = y.videoId || null;
+    session.youtube.broadcastId = y.broadcastId || null;
+    session.youtube.streamId = y.streamId || null;
+    session.youtube.ingestUrl = y.ingestUrl || null;
+    session.youtube.streamKey = y.streamKey || null;
+    session.youtube.source = y.source || null;
+    session.youtube.error = y.error || null;
+}
+
+function questionDTO(q, viewerId) {
+    const dto = {
+        id: String(q._id),
+        text: q.text,
+        name: q.name || "Student",
+        avatar: q.avatar || null,
+        upvoteCount: (q.upvoters || []).length,
+        answered: Boolean(q.answered),
+        pinned: Boolean(q.pinned),
+        createdAt: q.createdAt,
+    };
+    // Only included when we know WHO is asking (broadcasts must not carry it)
+    if (viewerId) {
+        dto.iUpvoted = (q.upvoters || []).some((id) => String(id) === String(viewerId));
+        dto.mine = String(q.user) === String(viewerId);
+    }
+    return dto;
+}
+
+async function findQuestion(session, id) {
+    if (!mongoose.Types.ObjectId.isValid(id)) return null;
+    return LiveQuestion.findOne({ _id: id, session: session._id });
+}
+
+/* ------------------------------ ADMIN ------------------------------ */
+
+router.get("/provider-settings", requireAdmin, async (req, res) => {
+    try {
+        return res.json({
+            success: true,
+            data: {
+                defaultProvider: await getDefaultProvider(),
+                youtube: await youtube.getStatus(),
+            },
+        });
+    } catch (error) {
+        console.error("provider settings error:", error);
+        return res.status(500).json({ success: false, message: "Unable to load video settings." });
+    }
+});
+
+router.patch("/provider-settings", requireAdmin, async (req, res) => {
+    try {
+        const next = req.body?.defaultProvider;
+        if (next !== "livekit" && next !== "youtube") {
+            return res.status(400).json({ success: false, message: "Choose livekit or youtube." });
+        }
+
+        await LiveSetting.findOneAndUpdate(
+            { key: "liveProvider" },
+            { value: { defaultProvider: next } },
+            { upsert: true }
+        );
+
+        return res.json({
+            success: true,
+            message: next === "youtube" ? "New classes will use YouTube." : "New classes will use BlockHub Live (LiveKit).",
+            data: { defaultProvider: next },
+        });
+    } catch (error) {
+        console.error("provider settings update error:", error);
+        return res.status(500).json({ success: false, message: "Unable to save the setting." });
+    }
+});
+
+router.get("/youtube/connect-url", requireAdmin, async (req, res) => {
+    if (!youtube.isConfigured()) {
+        return res.status(503).json({
+            success: false,
+            code: "NOT_CONFIGURED",
+            message:
+                "YouTube keys are missing on the server. Add YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET and YOUTUBE_REDIRECT_URI.",
+        });
+    }
+    return res.json({ success: true, data: { url: youtube.buildAuthUrl(req.viewer.userId) } });
+});
+
+router.post("/youtube/disconnect", requireAdmin, async (req, res) => {
+    try {
+        await youtube.disconnect();
+        return res.json({ success: true, message: "YouTube disconnected." });
+    } catch (error) {
+        console.error("youtube disconnect error:", error);
+        return res.status(500).json({ success: false, message: "Unable to disconnect YouTube." });
+    }
+});
+
+/* ---------------------------- JOIN / LEAVE ---------------------------- */
+
+router.post("/sessions/:code/youtube/join", async (req, res) => {
+    try {
+        const session = await loadSession(req, res);
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const viewer = req.viewer;
+        const isHost = hostCanManage(viewer, session);
+
+        if (!isHost && (session.blocked || []).some((id) => String(id) === viewer.userId)) {
+            return res.status(403).json({
+                success: false,
+                code: "REMOVED",
+                message: "You were removed from this class by the tutor.",
+            });
+        }
+
+        // Attendance: counts once the class is live. Safe to call repeatedly.
+        if (session.status === "live") {
+            await markJoined({
+                sessionId: session._id,
+                userId: viewer.userId,
+                role: isHost ? "host" : "student",
+                name: viewer.name,
+            });
+        }
+
+        const data = {
+            session: await toSessionDTO(session, viewer),
+            ticket: youtube.signTicket({ code: session.code, userId: viewer.userId }),
+        };
+
+        if (isHost) {
+            const full = await LiveSession.findById(session._id)
+                .select("+youtube.streamKey")
+                .lean();
+            data.stream = {
+                ingestUrl: full?.youtube?.ingestUrl || null,
+                streamKey: full?.youtube?.streamKey || null,
+            };
+        }
+
+        return res.json({ success: true, data });
+    } catch (error) {
+        console.error("youtube join error:", error);
+        return res.status(500).json({ success: false, message: "Unable to open the class right now." });
+    }
+});
+
+router.post("/sessions/:code/youtube/leave", async (req, res) => {
+    try {
+        const code = normaliseCode(req.params.code);
+        const session = code ? await LiveSession.findOne({ code }).select("_id") : null;
+        if (session) await markLeft({ sessionId: session._id, userId: req.viewer.userId });
+        return res.json({ success: true });
+    } catch (error) {
+        return res.json({ success: true });
+    }
+});
+
+/* ------------------------------ TUTOR ------------------------------ */
+
+router.post("/sessions/:code/youtube/start", requireHost, async (req, res) => {
+    try {
+        const session = await loadSession(req, res, { mustManage: true });
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        if (session.status === "ended") {
+            return res.status(410).json({ success: false, code: "ENDED", message: "This class has ended." });
+        }
+
+        if (session.status !== "live") {
+            session.status = "live";
+            session.startedAt = session.startedAt || new Date();
+            await session.save();
+
+            if (req.body?.notifyStudents === true) {
+                notify.classLive(session, req.viewer.name);
+            }
+
+            if (session.cohortClass) {
+                await CohortClass.updateOne(
+                    { _id: session.cohortClass, status: "scheduled" },
+                    { $set: { status: "ongoing" } }
+                );
+            }
+        }
+
+        await markJoined({
+            sessionId: session._id,
+            userId: req.viewer.userId,
+            role: "host",
+            name: req.viewer.name,
+        });
+
+        emitToSession(session.code, "yt:session", { status: "live" });
+
+        return res.json({ success: true, data: await toSessionDTO(session, req.viewer) });
+    } catch (error) {
+        console.error("youtube start error:", error);
+        return res.status(500).json({ success: false, message: "Unable to start the class." });
+    }
+});
+
+router.patch("/sessions/:code/youtube/video", requireHost, async (req, res) => {
+    try {
+        const session = await loadSession(req, res, { mustManage: true });
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const videoId = youtube.parseVideoId(req.body?.videoUrl);
+        if (!videoId) {
+            return res.status(400).json({
+                success: false,
+                message: "That doesn't look like a YouTube link. Paste the link of your live stream.",
+            });
+        }
+
+        if (session.youtube.broadcastId && session.youtube.broadcastId !== videoId) {
+            session.youtube.broadcastId = null; // no longer the video we created
+        }
+        session.youtube.videoId = videoId;
+        session.youtube.source = session.youtube.broadcastId ? "auto" : "manual";
+        session.youtube.error = null;
+        await session.save();
+
+        emitToSession(session.code, "yt:session", { videoId });
+
+        return res.json({ success: true, message: "Video updated.", data: await toSessionDTO(session, req.viewer) });
+    } catch (error) {
+        console.error("youtube video error:", error);
+        return res.status(500).json({ success: false, message: "Unable to save the video." });
+    }
+});
+
+router.post("/sessions/:code/youtube/retry", requireHost, async (req, res) => {
+    try {
+        const session = await loadSession(req, res, { mustManage: true });
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        if (session.status === "ended") {
+            return res.status(410).json({ success: false, code: "ENDED", message: "This class has ended." });
+        }
+        if (session.youtube.broadcastId) {
+            return res.status(400).json({ success: false, message: "The YouTube event already exists." });
+        }
+
+        const classItem = session.cohortClass ? await CohortClass.findById(session.cohortClass).lean() : null;
+        const prepared = await prepareYoutube({ title: session.title, classItem });
+
+        applyYoutube(session, prepared);
+        await session.save();
+
+        if (prepared.error) {
+            return res.status(502).json({ success: false, message: prepared.error });
+        }
+
+        emitToSession(session.code, "yt:session", { videoId: prepared.videoId });
+
+        return res.json({
+            success: true,
+            message: "YouTube event created.",
+            data: {
+                session: await toSessionDTO(session, req.viewer),
+                stream: { ingestUrl: prepared.ingestUrl, streamKey: prepared.streamKey },
+            },
+        });
+    } catch (error) {
+        console.error("youtube retry error:", error);
+        return res.status(500).json({ success: false, message: "Unable to create the YouTube event." });
+    }
+});
+
+/* ---------------------------- QUESTIONS ---------------------------- */
+
+router.get("/sessions/:code/questions", async (req, res) => {
+    try {
+        const session = await loadSession(req, res);
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const rows = await LiveQuestion.find({ session: session._id })
+            .sort({ createdAt: -1 })
+            .limit(300);
+
+        return res.json({
+            success: true,
+            data: rows.map((q) => questionDTO(q, req.viewer.userId)),
+        });
+    } catch (error) {
+        console.error("list questions error:", error);
+        return res.status(500).json({ success: false, message: "Unable to load questions." });
+    }
+});
+
+router.post("/sessions/:code/questions", async (req, res) => {
+    try {
+        const session = await loadSession(req, res);
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const text = String(req.body?.text || "").trim().slice(0, QUESTION_MAX);
+        if (!text) {
+            return res.status(400).json({ success: false, message: "Type your question first." });
+        }
+
+        if (session.status === "ended") {
+            return res.status(410).json({ success: false, code: "ENDED", message: "This class has ended." });
+        }
+
+        const viewer = req.viewer;
+
+        const recent = await LiveQuestion.findOne({
+            session: session._id,
+            user: viewer.userId,
+            createdAt: { $gt: new Date(Date.now() - 4000) },
+        }).select("_id");
+        if (recent) {
+            return res.status(429).json({ success: false, message: "Slow down a little, then ask again." });
+        }
+
+        const asked = await LiveQuestion.countDocuments({ session: session._id, user: viewer.userId });
+        if (asked >= 40) {
+            return res.status(429).json({ success: false, message: "You've asked a lot of questions in this class. Let others ask too." });
+        }
+
+        const question = await LiveQuestion.create({
+            session: session._id,
+            user: viewer.userId,
+            name: viewer.name,
+            avatar: viewer.avatar || null,
+            text,
+        });
+
+        emitToSession(session.code, "yt:q:new", questionDTO(question));
+
+        return res.status(201).json({ success: true, data: questionDTO(question, viewer.userId) });
+    } catch (error) {
+        console.error("ask question error:", error);
+        return res.status(500).json({ success: false, message: "Unable to send your question." });
+    }
+});
+
+router.post("/sessions/:code/questions/:id/upvote", async (req, res) => {
+    try {
+        const session = await loadSession(req, res);
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const question = await findQuestion(session, req.params.id);
+        if (!question) {
+            return res.status(404).json({ success: false, message: "Question not found." });
+        }
+
+        const userId = req.viewer.userId;
+        const already = question.upvoters.some((id) => String(id) === userId);
+
+        await LiveQuestion.updateOne(
+            { _id: question._id },
+            already ? { $pull: { upvoters: userId } } : { $addToSet: { upvoters: userId } }
+        );
+
+        const fresh = await LiveQuestion.findById(question._id);
+        emitToSession(session.code, "yt:q:update", questionDTO(fresh));
+
+        return res.json({ success: true, data: questionDTO(fresh, userId) });
+    } catch (error) {
+        console.error("upvote error:", error);
+        return res.status(500).json({ success: false, message: "Unable to upvote." });
+    }
+});
+
+router.patch("/sessions/:code/questions/:id", requireHost, async (req, res) => {
+    try {
+        const session = await loadSession(req, res, { mustManage: true });
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const question = await findQuestion(session, req.params.id);
+        if (!question) {
+            return res.status(404).json({ success: false, message: "Question not found." });
+        }
+
+        if (typeof req.body?.answered === "boolean") question.answered = req.body.answered;
+        if (typeof req.body?.pinned === "boolean") question.pinned = req.body.pinned;
+        await question.save();
+
+        emitToSession(session.code, "yt:q:update", questionDTO(question));
+
+        return res.json({ success: true, data: questionDTO(question, req.viewer.userId) });
+    } catch (error) {
+        console.error("update question error:", error);
+        return res.status(500).json({ success: false, message: "Unable to update the question." });
+    }
+});
+
+router.delete("/sessions/:code/questions/:id", async (req, res) => {
+    try {
+        const session = await loadSession(req, res);
+        if (!session) return;
+        if (!requireYoutubeSession(session, res)) return;
+
+        const question = await findQuestion(session, req.params.id);
+        if (!question) {
+            return res.status(404).json({ success: false, message: "Question not found." });
+        }
+
+        const isAuthor = String(question.user) === req.viewer.userId;
+        if (!isAuthor && !hostCanManage(req.viewer, session)) {
+            return res.status(403).json({ success: false, message: "You can only remove your own questions." });
+        }
+
+        await LiveQuestion.deleteOne({ _id: question._id });
+        emitToSession(session.code, "yt:q:remove", { id: String(question._id) });
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("delete question error:", error);
+        return res.status(500).json({ success: false, message: "Unable to remove the question." });
     }
 });
 

@@ -80,6 +80,23 @@ const liveSessionSchema = new mongoose.Schema(
             muteStudentsOnJoin: { type: Boolean, default: true },
         },
 
+        // Which video system runs this class.
+        //   "livekit" -> the in-browser Meet-style room (default)
+        //   "youtube" -> one-way YouTube Live + BlockHub questions
+        provider: { type: String, enum: ["livekit", "youtube"], default: "livekit", index: true },
+
+        youtube: {
+            videoId: { type: String, default: null },
+            broadcastId: { type: String, default: null },
+            streamId: { type: String, default: null },
+            ingestUrl: { type: String, default: null },
+            // Secret: never loaded unless asked for with .select("+youtube.streamKey")
+            streamKey: { type: String, default: null, select: false },
+            // "auto" = created through the YouTube API, "manual" = tutor pasted a link
+            source: { type: String, enum: ["auto", "manual", null], default: null },
+            error: { type: String, default: null },
+        },
+
         lobby: { type: [lobbyEntrySchema], default: [] },
 
         // Users the tutor removed - they cannot rejoin this session
