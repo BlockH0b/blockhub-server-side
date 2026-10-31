@@ -3,7 +3,8 @@ const router = express.Router();
 const Waitlist = require('../models/waitlist');
 const { sendAcademyThankYou } = require('../utils/nodemailer');
 const notify = require('../services/email/notify');
-const { createCanvas, loadImage } = require("canvas");
+// "canvas" is loaded lazily inside /generate-image so a missing native build
+// (common on new Node versions) can't stop the whole server from starting.
 const fs = require("fs");
 const cloudinary = require('../utils/cloudinary');
 
@@ -73,6 +74,7 @@ router.get('/waitlist-count', async (req, res) => {
 // endpoint to generate the image
 router.post("/generate-image", async (req, res) => {
     try {
+        const { createCanvas, loadImage } = require("canvas");
         const { name, profileImage } = req.body;
 
         if (!name || !profileImage) {

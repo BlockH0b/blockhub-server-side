@@ -1395,7 +1395,8 @@ router.get("/sessions/:code/attendance", requireHost, async (req, res) => {
 ================================================================== */
 
 function requireAdmin(req, res, next) {
-    if (req.viewer?.kind !== "admin") {
+    // isAdmin (not kind): an admin who is also a cohort tutor resolves as kind "tutor"
+    if (!req.viewer?.isAdmin) {
         return res.status(403).json({ success: false, message: "Only admins can do this." });
     }
     next();
