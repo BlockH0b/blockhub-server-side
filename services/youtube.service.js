@@ -226,7 +226,9 @@ async function yt(method, path, { params, data } = {}) {
         });
         return response.data;
     } catch (error) {
-        throw new Error(friendlyError(error));
+        const wrapped = new Error(friendlyError(error));
+        wrapped.reason = error?.response?.data?.error?.errors?.[0]?.reason || null;
+        throw wrapped;
     }
 }
 
@@ -250,28 +252,44 @@ async function createLiveEvent({ title, startsAt }) {
     const cleanTitle = String(title || "BlockHub live class").slice(0, 100);
 
     // 1. the broadcast - the event students watch
-    const broadcast = await yt("post", "/liveBroadcasts", {
-        params: { part: "snippet,status,contentDetails" },
-        data: {
-            snippet: {
-                title: cleanTitle,
-                description: "BlockHub Cohort live class.",
-                scheduledStartTime: start.toISOString(),
+    const contentDetails = {
+        enableAutoStart: true, // goes live when video starts arriving
+        enableAutoStop: true, // ends when the tutor stops streaming
+        enableEmbed: true,
+        recordFromStart: true,
+        enableDvr: latency !== "ultraLow",
+        latencyPreference: latency,
+    };
+    const insertBroadcast = () =>
+        yt("post", "/liveBroadcasts", {
+            params: { part: "snippet,status,contentDetails" },
+            data: {
+                snippet: {
+                    title: cleanTitle,
+                    description: "BlockHub Cohort live class.",
+                    scheduledStartTime: start.toISOString(),
+                },
+                status: {
+                    privacyStatus: "unlisted",
+                    selfDeclaredMadeForKids: false,
+                },
+                contentDetails,
             },
-            status: {
-                privacyStatus: "unlisted",
-                selfDeclaredMadeForKids: false,
-            },
-            contentDetails: {
-                enableAutoStart: true, // goes live when video starts arriving
-                enableAutoStop: true, // ends when the tutor stops streaming
-                enableEmbed: true,
-                recordFromStart: true,
-                enableDvr: latency !== "ultraLow",
-                latencyPreference: latency,
-            },
-        },
-    });
+        });
+
+    let broadcast;
+    try {
+        broadcast = await insertBroadcast();
+    } catch (error) {
+        // Some channels (new / not yet verified) may not set the embed option
+        // through the API. Retry without it: the channel's own default applies.
+        const embedRejected =
+            error.reason === "invalidEmbedSetting" || /embed setting/i.test(String(error.message));
+        if (!embedRejected) throw error;
+        console.warn("[youtube] embed setting rejected for this channel; retrying without enableEmbed");
+        delete contentDetails.enableEmbed;
+        broadcast = await insertBroadcast();
+    }
 
     // 2. the stream - where the tutor sends video
     const stream = await yt("post", "/liveStreams", {
