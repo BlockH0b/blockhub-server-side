@@ -60,7 +60,7 @@ const {
     closeAllVisits,
 } = require("../services/liveClass.helpers");
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
-const { liveClassAuth, requireHost } = require("../middlewave/liveClassAuth");
+const { liveClassAuth, requireHost, sameKey } = require("../middlewave/liveClassAuth");
 const notify = require("../services/email/notify");
 const Meeting = require("../models/Meeting");
 const meetingNotify = require("../services/meetings/notify");
@@ -265,7 +265,7 @@ function hostCanManage(viewer, session) {
     if (isMeeting(session)) return Boolean(viewer.isAdmin);
     if (viewer.role !== "host") return false;
     if (viewer.kind === "admin") return true;
-    return viewer.cohort === session.cohort && viewer.track === session.track;
+    return sameKey(viewer.cohort, session.cohort) && sameKey(viewer.track, session.track);
 }
 
 function viewerCanAccess(viewer, session) {
@@ -275,7 +275,7 @@ function viewerCanAccess(viewer, session) {
         return true;
     }
     if (viewer.kind === "admin") return true;
-    return viewer.cohort === session.cohort && viewer.track === session.track;
+    return sameKey(viewer.cohort, session.cohort) && sameKey(viewer.track, session.track);
 }
 
 /** Keep the Meeting's status in step with its call */
@@ -470,7 +470,9 @@ async function loadSession(req, res, { mustManage = false } = {}) {
                 : {
                     success: false,
                     code: "WRONG_TRACK",
-                    message: `This class is for the ${session.track} track. You can only join classes for your own track.`,
+                    message: req.viewer.track
+                        ? `This class is for the ${session.track} track, but the account you're signed in with is on the ${req.viewer.track} track. You can only join classes for your own track.`
+                        : `This class is for the ${session.track} track. You can only join classes for your own track.`,
                 }
         );
         return null;
@@ -534,6 +536,48 @@ router.get("/youtube/callback", async (req, res) => {
 router.use(liveClassAuth);
 
 /* ------------------------------------------------------------------
+   WHO AM I (for troubleshooting)           GET /whoami
+   Shows which login this browser is using for live classes.
+   Add ?code=abc-defg-hij to see how it matches one class.
+------------------------------------------------------------------ */
+
+router.get("/whoami", async (req, res) => {
+    const v = req.viewer;
+    const out = {
+        success: true,
+        you: {
+            name: v.name,
+            email: v.email || null,
+            kind: v.kind,
+            role: v.role,
+            cohort: v.cohort,
+            track: v.track,
+            isAdmin: Boolean(v.isAdmin),
+            signedInWith: v.via || null,
+        },
+    };
+
+    const code = normaliseCode(req.query.code);
+    if (code) {
+        const session = await LiveSession.findOne({ code }).lean();
+        out.class = session
+            ? {
+                code: session.code,
+                title: session.title,
+                cohort: session.cohort,
+                track: session.track,
+                status: session.status,
+                provider: session.provider || "livekit",
+                canJoin: viewerCanAccess(v, session),
+                isTutorForIt: hostCanManage(v, session),
+            }
+            : { code, found: false };
+    }
+
+    return res.json(out);
+});
+
+/* ------------------------------------------------------------------
    CREATE (or reuse) A CLASS CALL           POST /sessions
    body: { classId?, title?, track?, cohort?, settings? }
 ------------------------------------------------------------------ */
@@ -568,7 +612,7 @@ router.post("/sessions", requireHost, async (req, res) => {
             if (viewer.kind === "admin") {
                 cohort = classItem.cohort;
                 track = classItem.track;
-            } else if (classItem.cohort !== cohort || classItem.track !== track) {
+            } else if (!sameKey(classItem.cohort, cohort) || !sameKey(classItem.track, track)) {
                 return res.status(403).json({
                     success: false,
                     message: "You can only start live classes for your own track.",
@@ -702,15 +746,17 @@ router.get("/sessions/active", async (req, res) => {
             return res.json({ success: true, data: [] });
         }
 
-        if (req.viewer.kind !== "admin") {
-            filter.cohort = req.viewer.cohort;
-            filter.track = req.viewer.track;
-        }
-
-        const sessions = await LiveSession.find(filter)
+        let sessions = await LiveSession.find(filter)
             .sort({ status: 1, createdAt: -1 }) // "live" sorts before "scheduled"
-            .limit(10)
+            .limit(100)
             .lean();
+
+        if (req.viewer.kind !== "admin") {
+            sessions = sessions.filter(
+                (s) => sameKey(s.cohort, req.viewer.cohort) && sameKey(s.track, req.viewer.track)
+            );
+        }
+        sessions = sessions.slice(0, 10);
 
         const data = sessions.map((s) => ({
             id: String(s._id),

@@ -56,7 +56,34 @@ function buildStudent(user, registration) {
     };
 }
 
-async function resolveViewer(req) {
+/**
+ * Track / cohort names are compared loosely, so "Full Stack Web Development",
+ * "Full-Stack Web Development" and "full stack web development " all match,
+ * and so do "cohort-1.0" and "Cohort 1.0".
+ */
+function keyOf(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function sameKey(a, b) {
+    const ka = keyOf(a);
+    return Boolean(ka) && ka === keyOf(b);
+}
+
+/** Same rules as the routes use: can this identity host / see this class? */
+function fitsSession(viewer, session) {
+    if (viewer.kind === "admin") return true;
+    return sameKey(viewer.cohort, session.cohort) && sameKey(viewer.track, session.track);
+}
+
+/**
+ * Every identity the browser can prove, best first:
+ *   main login as tutor / admin, main login as a registered student,
+ *   then the cohort dashboard cookie (BHCtoken) as a student.
+ * Also returns the main user (for the "member" fallback).
+ */
+async function collectIdentities(req) {
+    const identities = [];
     let mainUser = null;
 
     /* ---------- 1. Main login cookie ---------- */
@@ -77,7 +104,7 @@ async function resolveViewer(req) {
                     (await CohortTutor.findOne({ user: user._id }).lean());
 
                 if (tutor && tutor.status === "active") {
-                    return {
+                    identities.push({
                         userId: String(user._id),
                         name: user.fullName || "Tutor",
                         avatar: user.profileImage || null,
@@ -87,12 +114,13 @@ async function resolveViewer(req) {
                         email: user.email || null,
                         cohort: tutor.cohort,
                         track: tutor.track,
-                    };
+                        via: "main-login",
+                    });
                 }
             }
 
             if (user.admin) {
-                return {
+                identities.push({
                     userId: String(user._id),
                     name: user.fullName || "BlockHub Admin",
                     avatar: user.profileImage || null,
@@ -102,7 +130,8 @@ async function resolveViewer(req) {
                     email: user.email || null,
                     cohort: null,
                     track: null,
-                };
+                    via: "main-login",
+                });
             }
 
             const registration = await CohortRegistration.findOne({
@@ -113,7 +142,7 @@ async function resolveViewer(req) {
                 .lean();
 
             if (registration) {
-                return buildStudent(user, registration);
+                identities.push({ ...buildStudent(user, registration), via: "main-login" });
             }
         }
     }
@@ -136,8 +165,39 @@ async function resolveViewer(req) {
                 .select("_id fullName profileImage")
                 .lean();
 
-            if (user) return buildStudent(user, registration);
+            if (user) identities.push({ ...buildStudent(user, registration), via: "cohort-login" });
         }
+    }
+
+    return { identities, mainUser };
+}
+
+/** The cohort class this request is about (null for meetings / no code) */
+async function sessionForRequest(req) {
+    const code = codeFromPath(req);
+    if (!code) return null;
+    // eslint-disable-next-line global-require
+    const LiveSession = require("../models/LiveSession");
+    const session = await LiveSession.findOne({ code }).select("kind cohort track").lean();
+    if (!session || session.kind === "meeting") return null;
+    return session;
+}
+
+async function resolveViewer(req) {
+    const { identities, mainUser } = await collectIdentities(req);
+
+    if (identities.length) {
+        // Opening a particular class: use the login that fits THAT class.
+        // (e.g. a student whose main BlockHub login is a different account
+        //  than their cohort login, or a tutor who is also a student)
+        const session = await sessionForRequest(req);
+        if (session) {
+            const host = identities.find((v) => v.role === "host" && fitsSession(v, session));
+            if (host) return host;
+            const fits = identities.find((v) => fitsSession(v, session));
+            if (fits) return fits;
+        }
+        return identities[0];
     }
 
     /* ---------- 3. Signed-in BlockHub member (Meetings only) ---------- */
@@ -152,6 +212,7 @@ async function resolveViewer(req) {
             email: mainUser.email || null,
             cohort: null,
             track: null,
+            via: "main-login",
         };
     }
 
@@ -249,4 +310,4 @@ const requireHost = (req, res, next) => {
     next();
 };
 
-module.exports = { liveClassAuth, requireHost, resolveViewer };
+module.exports = { liveClassAuth, requireHost, resolveViewer, sameKey };
