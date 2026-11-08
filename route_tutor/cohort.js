@@ -12,6 +12,73 @@ const CohortAnnouncement = require("../models/CohortAnnouncement");
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { getLiveSessionMap } = require("../services/liveClass.helpers");
 const notify = require("../services/email/notify");
+const googleMeet = require("../services/googleMeet.service");
+
+/*
+|--------------------------------------------------------------------------
+| GOOGLE MEET HELPERS
+|--------------------------------------------------------------------------
+| The BlockHub Google account hosts every class. These never throw: a
+| Google problem must not stop a class being saved - the tutor gets a
+| warning and can paste a link instead.
+*/
+
+function meetDetails(classItem, tutor) {
+  return {
+    title: classItem.title,
+    description: classItem.description,
+    startsAt: getClassStartsAt(classItem),
+    endsAt: getClassEndsAt(classItem),
+    tutorEmail: tutor?.email || null,
+    track: classItem.track,
+  };
+}
+
+async function attachGoogleMeet(classItem, tutor) {
+  try {
+    if (!(await googleMeet.isConnected())) {
+      return "Class saved, but no Google Meet link was made: Google Meet isn't connected yet. Ask an admin to connect it on the admin page, or paste a link.";
+    }
+    const meeting = await googleMeet.createMeeting(meetDetails(classItem, tutor));
+    classItem.meetingLink = meeting.meetLink;
+    classItem.meetingStatus = "available";
+    classItem.meetSource = "google";
+    classItem.googleEventId = meeting.eventId;
+    await classItem.save();
+    return null;
+  } catch (error) {
+    console.error("[tutor] google meet create failed:", error.message);
+    return `Class saved, but the Google Meet link couldn't be made. ${error.message}`;
+  }
+}
+
+async function updateGoogleMeet(classItem, tutor) {
+  try {
+    if (!classItem.googleEventId) return null;
+    await googleMeet.updateMeeting(classItem.googleEventId, meetDetails(classItem, tutor));
+    return null;
+  } catch (error) {
+    console.error("[tutor] google meet update failed:", error.message);
+    return `Class saved, but Google Meet wasn't updated. ${error.message}`;
+  }
+}
+
+async function cancelGoogleMeet(classItem) {
+  try {
+    if (!classItem.googleEventId) return null;
+    await googleMeet.cancelMeeting(classItem.googleEventId);
+    return null;
+  } catch (error) {
+    console.error("[tutor] google meet cancel failed:", error.message);
+    return `Class cancelled, but the Google Meet event couldn't be removed. ${error.message}`;
+  }
+}
+
+function cleanUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+}
 
 
 
@@ -194,6 +261,12 @@ router.get("/dashboard", async (req, res) => {
 
         meetingStatus:
           classItem.meetingStatus,
+
+        meetSource:
+          classItem.meetSource || null,
+
+        recordingLink:
+          classItem.recordingLink || null,
 
         emailStudents:
           classItem.emailStudents !== false,
@@ -540,12 +613,17 @@ router.post("/classes", async (req, res) => {
             : null,
 
         meetingLink:
-          meetingLink?.trim() || null,
+          cleanUrl(meetingLink),
 
         meetingStatus:
           meetingLink?.trim()
             ? "available"
             : "pending",
+
+        meetSource:
+          meetingLink?.trim()
+            ? "manual"
+            : null,
 
         status: "scheduled",
 
@@ -553,12 +631,27 @@ router.post("/classes", async (req, res) => {
         emailStudents: req.body?.emailStudents !== false,
       });
 
+    /*
+     * Google Meet: made automatically on the BlockHub Google account,
+     * unless the tutor pasted their own link or unticked it.
+     */
+
+    let meetWarning = null;
+
+    if (!newClass.meetingLink && req.body?.autoMeet !== false) {
+      meetWarning = await attachGoogleMeet(newClass, req.user);
+    }
+
     notify.classScheduled(newClass);
 
     return res.status(201).json({
       success: true,
-      message:
-        "Class created successfully.",
+      message: meetWarning
+        ? meetWarning
+        : newClass.meetSource === "google"
+          ? "Class created with a Google Meet link."
+          : "Class created successfully.",
+      meetWarning,
       data: newClass,
     });
   } catch (error) {
@@ -622,7 +715,14 @@ const updateClassHandler = async (req, res) => {
       meetingLink,
       status,
       emailStudents,
+      recordingLink,
+      autoMeet,
     } = req.body;
+
+    const previousTitle = classItem.title;
+    const previousDescription = classItem.description;
+    const previousEndsAt = getClassEndsAt(classItem);
+    let meetWarning = null;
 
     if (typeof emailStudents === "boolean") {
       classItem.emailStudents = emailStudents;
@@ -670,14 +770,32 @@ const updateClassHandler = async (req, res) => {
           : null;
     }
 
-    if (meetingLink !== undefined) {
-      classItem.meetingLink =
-        meetingLink?.trim() || null;
+    if (
+      meetingLink !== undefined &&
+      (cleanUrl(meetingLink) || null) !== (classItem.meetingLink || null)
+    ) {
+      // Tutor replaced (or removed) the link by hand: drop the
+      // BlockHub Google Meet event if there was one.
+      if (classItem.googleEventId) {
+        meetWarning = await cancelGoogleMeet(classItem);
+        classItem.googleEventId = null;
+      }
+
+      classItem.meetingLink = cleanUrl(meetingLink);
 
       classItem.meetingStatus =
-        meetingLink?.trim()
+        classItem.meetingLink
           ? "available"
           : "pending";
+
+      classItem.meetSource =
+        classItem.meetingLink
+          ? "manual"
+          : null;
+    }
+
+    if (recordingLink !== undefined) {
+      classItem.recordingLink = cleanUrl(recordingLink);
     }
 
     if (status !== undefined) {
@@ -698,6 +816,32 @@ const updateClassHandler = async (req, res) => {
     await classItem.save();
 
     const newStartsAt = getClassStartsAt(classItem);
+    const newEndsAt = getClassEndsAt(classItem);
+
+    /*
+     * Keep the Google Meet event in step with the class
+     */
+
+    if (classItem.status === "cancelled") {
+      if (previousStatus !== "cancelled" && classItem.googleEventId) {
+        meetWarning = await cancelGoogleMeet(classItem);
+        classItem.googleEventId = null;
+        await classItem.save();
+      }
+    } else if (classItem.googleEventId) {
+      const changed =
+        previousTitle !== classItem.title ||
+        (previousDescription || null) !== (classItem.description || null) ||
+        previousStartsAt?.getTime() !== newStartsAt?.getTime() ||
+        previousEndsAt?.getTime() !== newEndsAt?.getTime();
+
+      if (changed) {
+        meetWarning = await updateGoogleMeet(classItem, req.user);
+      }
+    } else if (autoMeet === true && !classItem.meetingLink) {
+      // "Create a Google Meet link" on a class that has none yet
+      meetWarning = await attachGoogleMeet(classItem, req.user);
+    }
 
     if (classItem.status === "cancelled" && previousStatus !== "cancelled") {
       notify.classCancelled(classItem);
@@ -713,7 +857,8 @@ const updateClassHandler = async (req, res) => {
     return res.status(200).json({
       success: true,
       message:
-        "Class updated successfully.",
+        meetWarning || "Class updated successfully.",
+      meetWarning,
       data: classItem,
     });
   } catch (error) {
@@ -781,6 +926,10 @@ router.delete("/classes/:id", async (req, res) => {
     const wasCancelled = classItem.status === "cancelled";
 
     classItem.status = "cancelled";
+
+    const meetWarning = await cancelGoogleMeet(classItem);
+
+    if (!meetWarning) classItem.googleEventId = null;
 
     await classItem.save();
 

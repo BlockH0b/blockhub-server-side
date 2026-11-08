@@ -78,6 +78,27 @@ const cohortClassSchema = new mongoose.Schema(
             default: "pending",
         },
 
+        // "google" = BlockHub made the Meet link on the BlockHub
+        // Google account (googleEventId is that calendar event).
+        // "manual" = the tutor pasted their own link.
+        meetSource: {
+            type: String,
+            enum: ["google", "manual", null],
+            default: null,
+        },
+
+        googleEventId: {
+            type: String,
+            default: null,
+        },
+
+        // Link to the class recording (Drive / YouTube / anywhere)
+        recordingLink: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+
         // ============================================
         // TUTOR
         // ============================================

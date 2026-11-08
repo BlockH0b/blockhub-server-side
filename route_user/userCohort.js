@@ -202,6 +202,9 @@ router.get(
                             ? classItem.meetingLink
                             : null,
 
+                    recordingLink:
+                        classItem.recordingLink || null,
+
                     status: mapClassStatus(classItem),
                 })
             );

@@ -65,6 +65,7 @@ const notify = require("../services/email/notify");
 const Meeting = require("../models/Meeting");
 const meetingNotify = require("../services/meetings/notify");
 const youtube = require("../services/youtube.service");
+const googleMeet = require("../services/googleMeet.service");
 const LiveQuestion = require("../models/LiveQuestion");
 const LiveSetting = require("../models/LiveSetting");
 const { getIO } = require("../confiq/socket");
@@ -521,6 +522,20 @@ function validIdentity(identity) {
 
 router.get("/youtube/callback", async (req, res) => {
     const front = (process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, "");
+    // The same Google callback is used to connect Google Meet (see googleMeet.service)
+    if (googleMeet.isMeetState(req.query.state)) {
+        try {
+            if (req.query.error) throw new Error(`Google said: ${String(req.query.error)}`);
+            await googleMeet.handleCallback(String(req.query.code || ""), String(req.query.state || ""));
+            return res.redirect(`${front}/admin?meet=connected`);
+        } catch (error) {
+            console.error("[live_class] google meet callback:", error.message);
+            return res.redirect(
+                `${front}/admin?meet=error&reason=${encodeURIComponent(String(error.message).slice(0, 160))}`
+            );
+        }
+    }
+
     try {
         if (req.query.error) throw new Error(`Google said: ${String(req.query.error)}`);
         await youtube.handleCallback(String(req.query.code || ""), String(req.query.state || ""));
@@ -1554,6 +1569,46 @@ router.post("/youtube/disconnect", requireAdmin, async (req, res) => {
     } catch (error) {
         console.error("youtube disconnect error:", error);
         return res.status(500).json({ success: false, message: "Unable to disconnect YouTube." });
+    }
+});
+
+/* -------------------------- GOOGLE MEET (admin) -------------------------- */
+/*
+ * One BlockHub Google account hosts every cohort class. When a tutor
+ * creates a class, BlockHub makes the Meet link on that account.
+ *   GET  /google-meet/status
+ *   GET  /google-meet/connect-url
+ *   POST /google-meet/disconnect
+ */
+
+router.get("/google-meet/status", requireAdmin, async (req, res) => {
+    try {
+        return res.json({ success: true, data: await googleMeet.getStatus() });
+    } catch (error) {
+        console.error("google meet status error:", error);
+        return res.status(500).json({ success: false, message: "Unable to load Google Meet status." });
+    }
+});
+
+router.get("/google-meet/connect-url", requireAdmin, async (req, res) => {
+    if (!googleMeet.isConfigured()) {
+        return res.status(503).json({
+            success: false,
+            code: "NOT_CONFIGURED",
+            message:
+                "Google keys are missing on the server. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI (or the YOUTUBE_* ones).",
+        });
+    }
+    return res.json({ success: true, data: { url: googleMeet.buildAuthUrl(req.viewer.userId) } });
+});
+
+router.post("/google-meet/disconnect", requireAdmin, async (req, res) => {
+    try {
+        await googleMeet.disconnect();
+        return res.json({ success: true, message: "Google Meet disconnected." });
+    } catch (error) {
+        console.error("google meet disconnect error:", error);
+        return res.status(500).json({ success: false, message: "Unable to disconnect Google Meet." });
     }
 });
 
