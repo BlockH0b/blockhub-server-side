@@ -13,6 +13,8 @@ const DEFAULT_HOSTS = [
     "teams.live.com",
     "youtube.com",
     "youtu.be",
+    "calendar.app.google", // Google Calendar invite links
+    "calendar.google.com",
 ];
 
 function allowedHosts() {
