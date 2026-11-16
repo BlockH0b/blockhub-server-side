@@ -204,7 +204,8 @@ router.get("/validate/:code", async (req, res) => {
 // We are keeping it here for now so we can test the flow.
 // ============================================================
 
-router.post("/create", async (req, res) => {
+// Locked to admins: anyone could create fake referrals here to farm points.
+router.post("/create", requireAdmin, async (req, res) => {
     try {
         const {
             referralCode,

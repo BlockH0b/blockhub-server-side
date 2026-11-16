@@ -78,6 +78,11 @@ router.post('/create_payment', async (req, res) => {
     try {
         let { name, email, is_call_payment, username, product_id, product_title, product_price } = req.body;
 
+        product_price = Number(product_price);
+        if (!Number.isFinite(product_price) || product_price <= 0) {
+            return res.status(400).json({ message: 'Invalid price.' });
+        }
+
         if (!name || !email || is_call_payment === undefined || !username || !product_id || !product_title || !product_price) {
             return res.status(400).json({ message: 'All fields are required.' });
         }
@@ -125,17 +130,61 @@ router.post('/create_payment', async (req, res) => {
 
 router.post('/mark_as_paid', async (req, res) => {
     try {
-        const { name, paymentId } = req.body;
+        const { name, paymentId, reference } = req.body;
 
-        // 1️⃣ Find and mark payment as paid
+        if (!paymentId || !reference || typeof reference !== 'string') {
+            return res.status(400).json({ message: 'Payment id and reference are required.' });
+        }
+
+        const existing = await Payment.findById(paymentId);
+        if (!existing) {
+            return res.status(404).json({ message: 'Payment record not found.' });
+        }
+        if (existing.status) {
+            return res.status(200).json({ message: 'Payment already confirmed.' });
+        }
+
+        // 1️⃣ SECURITY: confirm with Paystack that this money was really paid.
+        // Before, anyone could call this URL with any paymentId and get the
+        // product (and the WhatsApp / call link) for free.
+        let tx;
+        try {
+            const verify = await axios.get(
+                `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
+                { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }, timeout: 15000 }
+            );
+            tx = verify.data?.data;
+        } catch (e) {
+            console.error('mark_as_paid: Paystack verify failed', e.response?.data || e.message);
+            return res.status(400).json({ message: 'Could not confirm this payment with Paystack.' });
+        }
+
+        const expectedKobo = Math.round(Number(existing.product_price) * 100);
+        const paidEmail = String(tx?.customer?.email || '').toLowerCase();
+        if (
+            !tx ||
+            tx.status !== 'success' ||
+            String(tx.currency || '').toUpperCase() !== 'NGN' ||
+            Number(tx.amount) < expectedKobo ||
+            (paidEmail && paidEmail !== String(existing.email).toLowerCase())
+        ) {
+            return res.status(400).json({ message: 'Payment not confirmed.' });
+        }
+
+        // One Paystack payment can only unlock one order
+        const reused = await Payment.findOne({ paystackReference: reference, _id: { $ne: existing._id } });
+        if (reused) {
+            return res.status(409).json({ message: 'This payment reference was already used.' });
+        }
+
         const payment = await Payment.findOneAndUpdate(
-            { _id: paymentId },
-            { status: true },
+            { _id: paymentId, status: false },
+            { status: true, paystackReference: reference, amountPaid: Number(tx.amount) / 100 },
             { new: true }
         );
 
         if (!payment) {
-            return res.status(404).json({ message: 'Payment record not found.' });
+            return res.status(200).json({ message: 'Payment already confirmed.' });
         }
 
         // 2️⃣ Find user by twitterHandle (username in payment)
@@ -176,8 +225,6 @@ router.post('/mark_as_paid', async (req, res) => {
 
         return res.status(200).json({
             message: 'Payment marked as paid, user updated, email sent',
-            payment,
-            user: Iuser
         });
 
     } catch (err) {

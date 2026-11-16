@@ -2,7 +2,7 @@
  * ============================================================
  * Scheduled emails (node-cron, Lagos time)
  * ============================================================
- *   every 5 min  - class reminders (1 hour before)
+ *   every 5 min  - class reminders (1 day, 1 hour, 30 min before)
  *   every 5 min  - BlockHub Meetings reminders (1 hour before)
  *   every 30 min - "new campaign is live"
  *   hourly       - campaign ending in 24h / campaign ended
@@ -52,22 +52,36 @@ async function contactsFor(userIds) {
 }
 
 /* ------------------------------------------------------------
-   1. Class reminders - 1 hour before
+   1. Class reminders - 1 day, 1 hour and 30 minutes before
+   Change with CLASS_REMINDER_MINUTES=1440,60,30
+   Each reminder carries the Google Meet link if the tutor added it.
+   If a class still has no link 1 day / 1 hour before, the tutor
+   gets a "please add your link" email.
 ------------------------------------------------------------ */
+const REMINDER_MINUTES = String(process.env.CLASS_REMINDER_MINUTES || "1440,60,30")
+    .split(",")
+    .map((v) => Number(v.trim()))
+    .filter((v) => Number.isFinite(v) && v > 0);
+
 async function classReminders() {
     const now = Date.now();
-    // startDate is stored as a calendar date, so look at yesterday..tomorrow
+    // startDate is stored as a calendar date, so look at a few days around now
     const classes = await M.CohortClass.find({
         status: { $in: ["scheduled", "ongoing"] },
         emailStudents: { $ne: false }, // tutor turned emails off (test class)
-        startDate: { $gte: new Date(now - 2 * DAY), $lte: new Date(now + 2 * DAY) },
+        startDate: { $gte: new Date(now - 2 * DAY), $lte: new Date(now + 3 * DAY) },
     }).lean();
 
     for (const classDoc of classes) {
         const cls = notify.classInfo(classDoc);
         if (!cls.startsAt) continue;
         const msUntil = cls.startsAt.getTime() - now;
-        if (msUntil <= 50 * 60 * 1000 || msUntil > 65 * 60 * 1000) continue;
+
+        // The job runs every 5 min: a reminder fires once inside its window
+        const minutesLeft = REMINDER_MINUTES.find(
+            (m) => msUntil > (m - 10) * 60 * 1000 && msUntil <= (m + 5) * 60 * 1000
+        );
+        if (!minutesLeft) continue;
 
         const session = await M.LiveSession.findOne({
             cohortClass: classDoc._id,
@@ -80,13 +94,31 @@ async function classReminders() {
         queueBulk(students, {
             template: "class_reminder",
             category: "classUpdates",
-            dedupePrefix: `class-reminder:${classDoc._id}:${cls.startsAt.getTime()}`,
+            // 60 keeps the old key so a deploy never re-sends the 1-hour one
+            dedupePrefix: minutesLeft === 60
+                ? `class-reminder:${classDoc._id}:${cls.startsAt.getTime()}`
+                : `class-reminder-${minutesLeft}:${classDoc._id}:${cls.startsAt.getTime()}`,
             data: {
                 track: classDoc.track,
                 cls,
+                minutesLeft,
+                meetLink: cls.meetLink,
                 joinUrl: session ? `${getConfig().frontendUrl}/class/${session.code}` : null,
             },
         });
+
+        // No link yet -> nudge the tutor (1 day and 1 hour before)
+        if (!cls.meetLink && minutesLeft >= 60 && classDoc.tutor) {
+            const tutor = await notify.userContact(classDoc.tutor);
+            if (tutor) {
+                queueBulk([tutor], {
+                    template: "tutor_link_missing",
+                    category: "essential",
+                    dedupePrefix: `tutor-link-missing-${minutesLeft}:${classDoc._id}:${cls.startsAt.getTime()}`,
+                    data: { track: classDoc.track, cls, minutesLeft },
+                });
+            }
+        }
     }
 }
 

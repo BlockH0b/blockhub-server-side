@@ -42,6 +42,15 @@ function meetingDuration(minutes) {
 
 const first = (name) => (String(name || "").trim().split(/\s+/)[0] || "there");
 
+/** "starts in 1 hour" style wording for a reminder sent `minutesLeft` before */
+function reminderWhen(minutesLeft) {
+    const m = Number(minutesLeft) || 60;
+    if (m >= 1380) return { subject: "Tomorrow", text: "is tomorrow" };
+    if (m >= 120) return { subject: `In ${Math.round(m / 60)} hours`, text: `starts in ${Math.round(m / 60)} hours` };
+    if (m >= 60) return { subject: "Starts in 1 hour", text: "starts in 1 hour" };
+    return { subject: `Starts in ${m} minutes`, text: `starts in ${m} minutes` };
+}
+
 const T = {
     /* ======================================================
        ACCOUNT
@@ -119,8 +128,8 @@ const T = {
                 ["Duration", cls.duration],
             ]) +
             (cls.description ? p(esc(cls.description)) : "") +
-            button("View my classes", `${ctx.frontendUrl}/cohort/my-dashboard`) +
-            small("We'll remind you 1 hour before it starts."),
+            (cls.meetLink ? button("Join Google Meet", cls.meetLink) : button("View my classes", `${ctx.frontendUrl}/cohort/my-dashboard`)) +
+            small("We'll remind you 1 day, 1 hour and 30 minutes before it starts."),
         text: `New class: ${cls.title} — ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}`,
     }),
 
@@ -155,21 +164,102 @@ const T = {
         text: `Cancelled: ${cls.title} (${fmtDate(cls.startsAt)})`,
     }),
 
-    class_reminder: ({ name, track, cls, joinUrl }, ctx) => ({
-        subject: `⏰ Starts in 1 hour: ${cls.title}`,
-        preheader: `Today at ${fmtTime(cls.startsAt)}`,
+    // Sent 1 day, 1 hour and 30 minutes before a class (see jobs.js).
+    // meetLink = the Google Meet link the tutor added.
+    class_reminder: ({ name, track, cls, joinUrl, meetLink, minutesLeft }, ctx) => {
+        const when = reminderWhen(minutesLeft);
+        const link = meetLink || joinUrl || null;
+        return {
+            subject: `⏰ ${when.subject}: ${cls.title} — ${track}`,
+            preheader: `${fmtDate(cls.startsAt)} at ${fmtTime(cls.startsAt)}`,
+            html:
+                eyebrow(`${track} · Reminder`) +
+                h1(`Your class ${when.text}`) +
+                p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(cls.title)}</strong> starts at ${esc(fmtTime(cls.startsAt))}.`) +
+                details([
+                    ["Date", fmtDate(cls.startsAt)],
+                    ["Time", fmtTime(cls.startsAt)],
+                    ["Duration", cls.duration],
+                    ["Google Meet", meetLink || "Your tutor will add the link soon"],
+                ]) +
+                button(meetLink ? "Join Google Meet" : link ? "Open the class room" : "Open my dashboard", link || `${ctx.frontendUrl}/cohort/my-dashboard`) +
+                small(meetLink
+                    ? "Join a few minutes early and sign in with your Google account. Only use the link from BlockHub emails or your dashboard."
+                    : "The link will be in your dashboard and in your next reminder as soon as your tutor adds it."),
+            text: `${when.subject}: ${cls.title} at ${fmtTime(cls.startsAt)}. ${link || `${ctx.frontendUrl}/cohort/my-dashboard`}`,
+        };
+    },
+
+    // Tutor added (or changed) the Google Meet link of a class
+    class_link_ready: ({ name, track, cls, meetLink, changed }, ctx) => ({
+        subject: `${changed ? "New link" : "Class link"}: ${cls.title} — ${fmtDate(cls.startsAt)}`,
+        preheader: `Google Meet · ${fmtDate(cls.startsAt)} at ${fmtTime(cls.startsAt)}`,
         html:
-            eyebrow(`${track} · Reminder`) +
-            h1(`Your class starts in 1 hour`) +
-            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(cls.title)}</strong> starts at ${esc(fmtTime(cls.startsAt))}.`) +
+            eyebrow(`${track} · ${changed ? "Link changed" : "Class link"}`) +
+            h1(changed ? "Your class link has changed" : "Your class link is ready") +
+            p(`Hi ${esc(first(name))}, here is the Google Meet link for <strong style="color:#0a0a0a">${esc(cls.title)}</strong>.`) +
             details([
                 ["Date", fmtDate(cls.startsAt)],
                 ["Time", fmtTime(cls.startsAt)],
                 ["Duration", cls.duration],
+                ["Google Meet", meetLink],
             ]) +
-            button(joinUrl ? "Open the class room" : "Open my dashboard", joinUrl || `${ctx.frontendUrl}/cohort/my-dashboard`) +
-            small("Test your camera and mic a few minutes early on the join screen."),
-        text: `Starts in 1 hour: ${cls.title} at ${fmtTime(cls.startsAt)}. ${joinUrl || ctx.frontendUrl}`,
+            button("Join Google Meet", meetLink) +
+            small("We'll remind you 1 day, 1 hour and 30 minutes before the class. The link is also on your dashboard."),
+        text: `Google Meet link for ${cls.title} (${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}): ${meetLink}`,
+    }),
+
+    // Tutor: class is close and still has no link
+    tutor_link_missing: ({ name, track, cls, minutesLeft }, ctx) => ({
+        subject: `Add your Google Meet link: ${cls.title} (${reminderWhen(minutesLeft).subject.toLowerCase()})`,
+        preheader: `${fmtDate(cls.startsAt)} at ${fmtTime(cls.startsAt)} · students are waiting for the link`,
+        html:
+            eyebrow(`${track} · Tutor reminder`) +
+            h1("Your class has no link yet") +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(cls.title)}</strong> ${esc(reminderWhen(minutesLeft).text)} and students don't have a Google Meet link yet.`) +
+            details([
+                ["Date", fmtDate(cls.startsAt)],
+                ["Time", fmtTime(cls.startsAt)],
+            ]) +
+            p("Create the meeting in Google Meet, then paste the link on your tutor dashboard. BlockHub emails it to every student straight away.") +
+            button("Add the link", `${ctx.frontendUrl}/cohort/tutor-dashboard`),
+        text: `Add the Google Meet link for ${cls.title}: ${ctx.frontendUrl}/cohort/tutor-dashboard`,
+    }),
+
+    // Cohort onboarding invite (admin button). The D-Day graphic is
+    // attached inline as cid:onboarding-banner (see route_admin/cohortSchedule.js)
+    cohort_onboarding: ({ name, date, time, link, note }, ctx) => ({
+        subject: `🎉 It's D-Day! Join the BlockHub Skills Cohort 1.0 onboarding${time ? ` at ${time}` : " today"}`,
+        preheader: `Onboarding call ${date ? `on ${date}` : "today"}${time ? ` at ${time}` : ""}. Meet your tutors and get set for class.`,
+        html:
+            `<img src="cid:onboarding-banner" alt="BlockHub Skills Cohort 1.0 - D-Day" width="100%" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:14px;margin:0 0 24px">` +
+            eyebrow("Cohort 1.0 · Onboarding") +
+            h1(`Hi ${first(name)}, today is D-Day!`) +
+            p("You're invited to the <strong style=\"color:#0a0a0a\">BlockHub Skills Cohort 1.0 onboarding call</strong>. It's where the journey starts: meet the BlockHub team and your tutors, see the 8 learning tracks, and learn how classes, your dashboard and class reminders work.") +
+            details([
+                ["Date", date || "Today"],
+                ["Time", time || ""],
+                ["Where", link ? "Online (link below)" : "Online"],
+                ["Entry", "Free"],
+            ]) +
+            (note ? p(textToHtml(note)) : "") +
+            (link ? button("Join the onboarding call", link) : button("Open my dashboard", `${ctx.frontendUrl}/cohort/my-dashboard`)) +
+            small("Join 5 minutes early and bring your questions. Classes start tomorrow, and we'll email you the link before each one."),
+        text: `It's D-Day! BlockHub Skills Cohort 1.0 onboarding call - ${date || "today"}${time ? ` at ${time}` : ""}.${link ? ` Join: ${link}` : ""}${note ? `\n\n${note}` : ""}`,
+    }),
+
+    // Admin "Email a track" message
+    admin_message: ({ name, track, subject, message, senderName }, ctx) => ({
+        subject: subject,
+        preheader: String(message || "").slice(0, 110),
+        html:
+            eyebrow(`${track || "BlockHub"} · Message from BlockHub`) +
+            h1(subject) +
+            p(`Hi ${esc(first(name))},`) +
+            quote(textToHtml(message), "#48FF75") +
+            (senderName ? small(`Sent by ${esc(senderName)}, BlockHub team.`) : "") +
+            button("Open my dashboard", `${ctx.frontendUrl}/cohort/my-dashboard`),
+        text: `${subject}\n\n${message}\n\n${ctx.frontendUrl}/cohort/my-dashboard`,
     }),
 
     class_live: ({ name, track, title, tutorName, joinUrl }) => ({

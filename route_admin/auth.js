@@ -5,11 +5,14 @@ const express = require('express')
 const route = express.Router()
 const crypto = require('crypto');
 const { sendOTP } = require('../utils/nodemailer');
+const requireAdmin = require('../middlewave/adminAuth');
 // const sendOTP = require('../utils/nodemailer');
 
 
 
-route.post('/signup', async(req, res) => {
+// SECURITY: only an existing BlockHub admin can create another admin.
+// (Before, anyone could sign up here and get admin powers.)
+route.post('/signup', requireAdmin, async(req, res) => {
     const { username, email, password } = req.body;
 
     try {
@@ -20,7 +23,7 @@ route.post('/signup', async(req, res) => {
         const admin = new Admin({ username, email, password: hashedPassword });
         await admin.save();
 
-        res.status(201).json({ message: 'Admin created successfully', admin });
+        res.status(201).json({ message: 'Admin created successfully', admin: { id: admin._id, email: admin.email } });
     } catch (err) {
         res.status(500).json({ message: 'Server error' });
     }
@@ -41,7 +44,7 @@ route.post('/login', async(req, res) => {
         if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
 
         // Generate 6-digit OTP using crypto
-        const otp = crypto.randomInt(10000, 99999).toString();
+        const otp = crypto.randomInt(100000, 1000000).toString(); // 6 digits
         const otpTime = new Date();
 
         // Save OTP and timestamp in DB
@@ -51,12 +54,11 @@ route.post('/login', async(req, res) => {
         // sendOTP(email, otp);
         sendOTP(email, otp)
 
-        // Generate JWT
-        const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '2d' });
-
+        // SECURITY: the login token is only given AFTER the OTP is checked
+        // (see /verify-otp). Before, the token came back here, so the OTP did nothing.
         res.status(200).json({
-            message: 'Login successful, OTP sent',
-            token,
+            message: 'Password correct. OTP sent to your email.',
+            otpRequired: true,
             // otp, // in production you would email or SMS this, not expose it in response
             admin: {
                 id: admin._id,
@@ -85,7 +87,7 @@ route.post('/verify-otp', async(req, res) => {
         const expiry = new Date(admin.otpTime);
         expiry.setMinutes(expiry.getMinutes() + 10);
 
-        if (admin.otp !== otp) {
+        if (!admin.otp || admin.otp !== String(otp)) {
             return res.status(401).json({ message: 'Invalid OTP' });
         }
 
@@ -98,7 +100,13 @@ route.post('/verify-otp', async(req, res) => {
         admin.otpTime = null;
         await admin.save();
 
-        res.status(200).json({ message: 'OTP verified successfully' });
+        const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '2d' });
+
+        res.status(200).json({
+            message: 'OTP verified successfully',
+            token,
+            admin: { id: admin._id, username: admin.username, email: admin.email },
+        });
     } catch (err) {
         res.status(500).json({ message: 'Server error' });
     }

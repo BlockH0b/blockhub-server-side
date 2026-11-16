@@ -147,6 +147,20 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // ===============================
 
 // Twitter v1 auth
+// ---- Brute-force / spam protection on login, OTP and sign-up routes ----
+const rateLimit = require('./middlewave/rateLimit');
+const loginLimit = rateLimit({ max: 10, windowMinutes: 15 });
+app.use('/admin_auth/login', loginLimit);
+app.use('/admin_auth/verify-otp', rateLimit({ max: 5, windowMinutes: 15 }));
+app.use('/admin_auth/signup', rateLimit({ max: 5, windowMinutes: 60 }));
+app.use('/user_cohort/login', loginLimit);
+app.use('/user_cohort/login-link', rateLimit({ max: 5, windowMinutes: 15 }));
+app.use('/user_cohort/register', rateLimit({ max: 10, windowMinutes: 60 }));
+app.use('/tutor_auth/login-tutor', loginLimit);
+app.use('/project_auth/login', loginLimit);
+app.use('/user/create_payment', rateLimit({ max: 20, windowMinutes: 15 }));
+app.use('/user/mark_as_paid', rateLimit({ max: 20, windowMinutes: 15 }));
+
 app.use('/auth', require('./route_user/twitterAuth'));
 
 // Ambassador routes
@@ -198,6 +212,7 @@ app.use('/admin_tasks', require('./route_admin/task'));
 app.use('/admin_auth', require('./route_admin/auth'));
 app.use('/admin_ambassadors', require('./route_admin/ambassadors'));
 app.use('/admin_dashboard', require('./route_admin/dashboard'));
+app.use('/admin_cohort', require('./route_admin/cohortSchedule')); // timetable, class links, email a track
 
 // Project routes
 app.use('/project_auth', require('./route_project/auth'));

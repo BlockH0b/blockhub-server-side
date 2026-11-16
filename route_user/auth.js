@@ -8,6 +8,7 @@ const { TwitterApi } = require('twitter-api-v2');
 const twitterOAuth = require('../models/twitterOAuth');
 const user = require('../models/user');
 const auth = require('../middlewave/auth');
+const requireAdmin = require('../middlewave/adminAuth');
 const sanitizeUser = require('../utils/sanitizeUser');
 const router = express.Router();
 
@@ -547,7 +548,8 @@ router.post("/logout", (req, res) => {
 // ==========================
 // Endpoint: Get all paid users from Paystack
 // ==========================
-router.get('/paystack/paid-users', async (req, res) => {
+// SECURITY: admin only - this lists customers' names and emails
+router.get('/paystack/paid-users', requireAdmin, async (req, res) => {
   try {
     const response = await axios.get(
       'https://api.paystack.co/transaction',

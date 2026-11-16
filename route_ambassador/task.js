@@ -17,6 +17,7 @@ const project = require('../models/project');
 const projectAmbassador = require('../models/projectAmbassador');
 const tweetLog = require('../models/tweetLog');
 const Ambassadors = require('../models/Ambassadors');
+const { requireStaff } = require('../middlewave/staffAuth');
 
 // Get start of the current week (Monday as start)
 // Get start of the current week (Sunday as start)
@@ -34,11 +35,13 @@ function getStartOfWeekSunday() {
 // ----------------------------------
 // POST /add-points (per project scope not really needed here)
 // ----------------------------------
-router.post("/add-points", async (req, res) => {
+router.post("/add-points", requireStaff, async (req, res) => {
   try {
-    const { id, twitterId, points } = req.body;
+    const { id, twitterId } = req.body;
+    let { points } = req.body;
 
-    if (!points || (!id && !twitterId)) {
+    points = Number(points);
+    if (!Number.isFinite(points) || points <= 0 || points > 10000 || (!id && !twitterId)) {
       return res.status(400).json({ error: "Missing required fields." });
     }
 

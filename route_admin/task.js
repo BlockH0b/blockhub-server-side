@@ -9,6 +9,10 @@ const ambassador = require('../models/LegacyAmbassador');
 const ProjectAmbassador = require('../models/projectAmbassador');
 const task = require('../models/task');
 const jwt = require("jsonwebtoken");
+const { requireStaffForWrites } = require('../middlewave/staffAuth');
+
+// Every add / edit / delete / approve on this router now needs a real admin token
+router.use(requireStaffForWrites);
 
 // Get all tasks
 router.get('/get_tasks', async(req, res) => {

@@ -13,6 +13,7 @@ const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { getLiveSessionMap } = require("../services/liveClass.helpers");
 const notify = require("../services/email/notify");
 const googleMeet = require("../services/googleMeet.service");
+const { cleanMeetLink } = require("../utils/meetLink");
 
 /*
 |--------------------------------------------------------------------------
@@ -117,7 +118,8 @@ router.get("/dashboard", async (req, res) => {
     const classes = await CohortClass.find({
       cohort,
       track,
-      tutor: user._id,
+      // Every class of this track (classes made from the admin timetable
+      // belong to the track, not to one tutor)
     })
       .sort({
         startDate: 1,
@@ -537,6 +539,12 @@ router.post("/classes", async (req, res) => {
       });
     }
 
+    try {
+      req.body.meetingLink = cleanMeetLink(meetingLink);
+    } catch (linkError) {
+      return res.status(400).json({ success: false, message: linkError.message });
+    }
+
     /*
      * ------------------------------------------------------
      * CHECK DUPLICATE CLASS NUMBER
@@ -613,15 +621,15 @@ router.post("/classes", async (req, res) => {
             : null,
 
         meetingLink:
-          cleanUrl(meetingLink),
+          req.body.meetingLink,
 
         meetingStatus:
-          meetingLink?.trim()
+          req.body.meetingLink
             ? "available"
             : "pending",
 
         meetSource:
-          meetingLink?.trim()
+          req.body.meetingLink
             ? "manual"
             : null,
 
@@ -638,7 +646,9 @@ router.post("/classes", async (req, res) => {
 
     let meetWarning = null;
 
-    if (!newClass.meetingLink && req.body?.autoMeet !== false) {
+    // Only when the tutor ticks "Create a Google Meet link for me".
+    // Normally the tutor makes the meeting in Google Meet and pastes the link.
+    if (!newClass.meetingLink && req.body?.autoMeet === true) {
       meetWarning = await attachGoogleMeet(newClass, req.user);
     }
 
@@ -689,8 +699,7 @@ const updateClassHandler = async (req, res) => {
       await CohortClass.findOne({
         _id: id,
 
-        tutor: req.user._id,
-
+        // any class of the tutor's own track (incl. timetable classes)
         cohort: req.cohort,
 
         track: req.track,
@@ -712,14 +721,24 @@ const updateClassHandler = async (req, res) => {
       startTime,
       endTime,
       durationMinutes,
-      meetingLink,
       status,
       emailStudents,
       recordingLink,
       autoMeet,
     } = req.body;
 
+    let meetingLink = req.body.meetingLink;
+    if (meetingLink !== undefined) {
+      try {
+        meetingLink = cleanMeetLink(meetingLink);
+      } catch (linkError) {
+        return res.status(400).json({ success: false, message: linkError.message });
+      }
+    }
+
     const previousTitle = classItem.title;
+    const previousLink =
+      classItem.meetingStatus === "available" ? classItem.meetingLink || null : null;
     const previousDescription = classItem.description;
     const previousEndsAt = getClassEndsAt(classItem);
     let meetWarning = null;
@@ -798,6 +817,11 @@ const updateClassHandler = async (req, res) => {
       classItem.recordingLink = cleanUrl(recordingLink);
     }
 
+    // First person to work on a timetable class becomes its tutor
+    if (!classItem.tutor) {
+      classItem.tutor = req.user._id;
+    }
+
     if (status !== undefined) {
       const allowedStatuses = [
         "scheduled",
@@ -841,6 +865,14 @@ const updateClassHandler = async (req, res) => {
     } else if (autoMeet === true && !classItem.meetingLink) {
       // "Create a Google Meet link" on a class that has none yet
       meetWarning = await attachGoogleMeet(classItem, req.user);
+    }
+
+    // New / changed Google Meet link -> email every student in the track
+    const newLink =
+      classItem.meetingStatus === "available" ? classItem.meetingLink || null : null;
+
+    if (newLink && newLink !== previousLink && classItem.status !== "cancelled") {
+      notify.classLinkReady(classItem, { changed: Boolean(previousLink) });
     }
 
     if (classItem.status === "cancelled" && previousStatus !== "cancelled") {
@@ -899,8 +931,6 @@ router.delete("/classes/:id", async (req, res) => {
     const classItem =
       await CohortClass.findOne({
         _id: id,
-
-        tutor: req.user._id,
 
         cohort: req.cohort,
 

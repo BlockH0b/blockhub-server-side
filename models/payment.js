@@ -13,6 +13,8 @@ const paymentSchema = new mongoose.Schema({
     token: { type: String, unique: true, sparse: true },
     tokenUsed: { type: Boolean, default: false },
     expiresAt: { type: Date },
+    paystackReference: { type: String, unique: true, sparse: true },
+    amountPaid: { type: Number },
 }, {
     timestamps: true,
     collection: 'payment'

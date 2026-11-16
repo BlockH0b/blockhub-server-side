@@ -48,8 +48,16 @@ function classInfo(classDoc) {
         classNumber: classDoc.classNumber || null,
         startsAt: getClassStartsAt(classDoc),
         endsAt: getClassEndsAt(classDoc),
-        duration: formatDuration(classDoc.durationMinutes),
+        duration: formatDuration(classDoc.durationMinutes || minutesBetween(classDoc)),
+        // Google Meet link (only once the tutor/admin has added one)
+        meetLink: classDoc.meetingStatus === "available" && classDoc.meetingLink ? classDoc.meetingLink : null,
     };
+}
+
+function minutesBetween(classDoc) {
+    const s = getClassStartsAt(classDoc);
+    const e = getClassEndsAt(classDoc);
+    return s && e ? Math.round((e - s) / 60000) : 0;
 }
 
 function rewardText(campaign) {
@@ -213,6 +221,54 @@ function classCancelled(classDoc) {
             data: { track: classDoc.track, cls },
         });
     }, "notify.classCancelled");
+}
+
+/** Tutor / admin added or changed the Google Meet link -> email the track */
+function classLinkReady(classDoc, { changed = false } = {}) {
+    safely(async () => {
+        if (emailsOff(classDoc)) return;
+        if (classDoc.status === "cancelled") return;
+        const cls = classInfo(classDoc);
+        if (!cls.meetLink) return;
+        if (cls.endsAt && cls.endsAt < new Date()) return; // class already over
+        const linkKey = require("crypto").createHash("sha1").update(cls.meetLink).digest("hex").slice(0, 12);
+        const students = await trackStudents(classDoc.cohort, classDoc.track);
+        queueBulk(students, {
+            template: "class_link_ready",
+            category: "classUpdates",
+            dedupePrefix: `class-link:${classDoc._id}:${linkKey}`,
+            data: { track: classDoc.track, cls, meetLink: cls.meetLink, changed },
+        });
+    }, "notify.classLinkReady");
+}
+
+/**
+ * Admin "Email a track". tracks = ["Data Analytics", ...] (empty = every track).
+ * Returns how many emails were queued.
+ */
+async function trackMessage({ cohort, tracks = [], subject, message, senderName, batchId }) {
+    const filter = { status: { $ne: "rejected" } };
+    if (cohort) filter.cohort = cohort;
+    if (tracks.length) filter.track = { $in: tracks };
+    const regs = await M.CohortRegistration.find(filter).select("user email fullName track").lean();
+
+    const byTrack = new Map();
+    for (const r of regs) {
+        const list = byTrack.get(r.track) || [];
+        list.push({ userId: String(r.user), email: r.email, name: r.fullName });
+        byTrack.set(r.track, list);
+    }
+
+    let queued = 0;
+    for (const [track, students] of byTrack) {
+        queued += queueBulk(students, {
+            template: "admin_message",
+            category: "announcements",
+            dedupePrefix: `admin-msg:${batchId}`,
+            data: { track, subject, message, senderName },
+        });
+    }
+    return queued;
 }
 
 /** Tutor started a live class - email students not already in it */
@@ -549,6 +605,8 @@ module.exports = {
     classScheduled,
     classUpdated,
     classCancelled,
+    classLinkReady,
+    trackMessage,
     classLive,
     missedClass,
     tutorAssigned,

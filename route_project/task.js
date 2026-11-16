@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const projectAmbassador = require("../models/projectAmbassador");
 const project = require("../models/project");
+const { requireProject } = require("../middlewave/staffAuth");
 
 
 
@@ -39,10 +40,10 @@ router.post('/get_tasks', async (req, res) => {
 
 // Add a new task for a project
 // Add a new task for a project
-router.post('/add_task', async (req, res) => {
+router.post('/add_task', requireProject, async (req, res) => {
     try {
+        const projectId = req.projectId; // from the login token, not the request body
         const {
-            projectId,
             title,
             description,
             points,
@@ -108,9 +109,10 @@ router.post('/add_task', async (req, res) => {
 
 
 // Delete a task for a specific project
-router.delete('/delete_task/:projectId/:taskId', async (req, res) => {
+router.delete('/delete_task/:projectId/:taskId', requireProject, async (req, res) => {
     try {
-        const { projectId, taskId } = req.params;
+        const { taskId } = req.params;
+        const projectId = req.projectId;
 
         console.log('Deleting taskId:', taskId, 'from projectId:', projectId);
 
@@ -145,9 +147,15 @@ router.put('/edit_task', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const projectId = decoded.id;
 
+        // Only these fields can be edited (stops a project moving a task to
+        // another project or rewriting internal fields)
+        const allowed = ['title', 'description', 'points', 'is_active', 'important', 'durationInHours', 'expires_at', 'hashtags'];
+        const safeUpdate = {};
+        for (const k of allowed) if (updatedData[k] !== undefined) safeUpdate[k] = updatedData[k];
+
         // Update only if the task belongs to this project
         const updatedTask = await task.findOneAndUpdate({ _id: taskId, projectId: projectId },
-            updatedData, { new: true }
+            { $set: safeUpdate }, { new: true }
         );
 
         if (!updatedTask) {
@@ -205,20 +213,22 @@ router.put('/edit_task', async (req, res) => {
  */
 // Approve a task submission
 
-router.post('/approve', async (req, res) => {
+router.post('/approve', requireProject, async (req, res) => {
     try {
         const { submissionId } = req.body;
         if (!submissionId || !mongoose.Types.ObjectId.isValid(submissionId)) {
             return res.status(400).json({ message: 'Invalid submission ID' });
         }
 
-        const submission = await submit.findByIdAndUpdate(
-            submissionId,
+        // Only a pending submission of THIS project can be approved, and only once
+        // (approving twice used to add the points twice)
+        const submission = await submit.findOneAndUpdate(
+            { _id: submissionId, projectId: req.projectId, status: { $ne: 'approved' } },
             { status: 'approved' },
             { new: true }
         );
 
-        if (!submission) return res.status(404).json({ message: 'Submission not found' });
+        if (!submission) return res.status(404).json({ message: 'Submission not found or already approved' });
 
         const Itask = await task.findById(submission.taskId);
         if (!Itask) return res.status(404).json({ message: 'Task not found' });
@@ -253,7 +263,7 @@ router.post('/approve', async (req, res) => {
  * Decline a task submission
  */
 
-router.post('/decline', async (req, res) => {
+router.post('/decline', requireProject, async (req, res) => {
     try {
         const { submissionId } = req.body;
 
@@ -261,8 +271,9 @@ router.post('/decline', async (req, res) => {
             return res.status(400).json({ message: 'Invalid submission ID' });
         }
 
-        const submission = await submit.findByIdAndUpdate(
-            submissionId, { status: 'rejected' }, { new: true }
+        const submission = await submit.findOneAndUpdate(
+            { _id: submissionId, projectId: req.projectId, status: 'pending' },
+            { status: 'rejected' }, { new: true }
         );
 
         if (!submission) {

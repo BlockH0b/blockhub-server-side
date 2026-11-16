@@ -8,6 +8,10 @@ const Payment = require('../models/payment');
 const { sendWhatsappInvite, sendPortfolioEmail } = require('../utils/nodemailer');
 const task = require('../models/task');
 const jwt = require("jsonwebtoken");
+const { requireStaffForWrites } = require('../middlewave/staffAuth');
+
+// Points resets, invites, deletes etc. now need a real admin token
+router.use(requireStaffForWrites);
 
 
 // GET all ambassadors

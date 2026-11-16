@@ -201,11 +201,15 @@ router.post('/delete_portfolio', async (req, res) => {
         const Iuser = await user.findById(decoded.id);
         if (!Iuser) return res.status(404).json({ message: 'User not found' });
 
+        // Only delete a file that belongs to this user (before, any file on
+        // our Cloudinary account could be deleted by sending its id)
+        const index = Iuser.portfolioPublicId.indexOf(publicId);
+        if (index === -1) return res.status(403).json({ message: 'This portfolio file is not yours' });
+
         // Remove from Cloudinary
         await cloudinary.uploader.destroy(publicId);
 
         // Remove from DB arrays
-        const index = Iuser.portfolioPublicId.indexOf(publicId);
         if (index > -1) {
             Iuser.portfolioUrl.splice(index, 1);
             Iuser.portfolioPublicId.splice(index, 1);

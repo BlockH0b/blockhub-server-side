@@ -223,7 +223,7 @@ function queueEmail(options) {
  *   - data is merged with { name } and recipient.data
  *   - dedupePrefix + userId/email becomes the dedupe key
  */
-function queueBulk(recipients, { template, data = {}, category = "essential", dedupePrefix }) {
+function queueBulk(recipients, { template, data = {}, category = "essential", dedupePrefix, attachments }) {
     const config = getConfig();
     const seen = new Set();
     let count = 0;
@@ -243,6 +243,7 @@ function queueBulk(recipients, { template, data = {}, category = "essential", de
             user: r.userId || null,
             data: { ...data, name: r.name, ...(r.data || {}) },
             dedupeKey: dedupePrefix ? `${dedupePrefix}:${r.userId || email}` : undefined,
+            attachments,
             _skipTestLimit: overTestLimit,
         });
     }
