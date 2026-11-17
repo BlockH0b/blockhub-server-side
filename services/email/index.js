@@ -22,7 +22,7 @@
 
 const User = require("../../models/user");
 const EmailLog = require("../../models/EmailLog");
-const { deliver } = require("./transport");
+const { deliver, resetTransporter, retryAfterMinutes } = require("./transport");
 const { getConfig } = require("./config");
 const { layout } = require("./layout");
 const { templates } = require("./templates");
@@ -99,6 +99,7 @@ async function sendEmail({
     attachments,
     icalEvent, // calendar invite (see services/meetings/calendar.js)
     _skipTestLimit = false,
+    _retryLogId = null, // set by the retry job: re-use that log
 }) {
     const email = String(to || "").trim().toLowerCase();
 
@@ -106,29 +107,38 @@ async function sendEmail({
         return { status: "skipped", reason: "no valid email" };
     }
 
-    // Already sent? (dedupe)
-    if (dedupeKey) {
-        const exists = await EmailLog.exists({ dedupeKey, status: { $in: ["sent", "queued"] } });
-        if (exists) return { status: "skipped", reason: "already sent" };
-    }
-
     const prefs = await checkPreferences(user, category);
     const config = getConfig();
 
     let log;
-    try {
-        log = await EmailLog.create({
-            template,
-            category,
-            user: user || null,
-            to: email,
-            status: "queued",
-            testMode: config.testMode,
-            dedupeKey: dedupeKey || undefined,
-        });
-    } catch (error) {
-        if (error?.code === 11000) return { status: "skipped", reason: "already sent" };
-        throw error;
+    if (_retryLogId) {
+        log = await EmailLog.findOneAndUpdate(
+            { _id: _retryLogId, status: "retry" },
+            { status: "queued" },
+            { new: true }
+        );
+        if (!log) return { status: "skipped", reason: "retry already handled" };
+    } else {
+        // Already sent / waiting to retry? (dedupe)
+        if (dedupeKey) {
+            const exists = await EmailLog.exists({ dedupeKey, status: { $in: ["sent", "queued", "retry"] } });
+            if (exists) return { status: "skipped", reason: "already sent" };
+        }
+
+        try {
+            log = await EmailLog.create({
+                template,
+                category,
+                user: user || null,
+                to: email,
+                status: "queued",
+                testMode: config.testMode,
+                dedupeKey: dedupeKey || undefined,
+            });
+        } catch (error) {
+            if (error?.code === 11000) return { status: "skipped", reason: "already sent" };
+            throw error;
+        }
     }
 
     if (!prefs.allowed) {
@@ -170,11 +180,31 @@ async function sendEmail({
 
         return result.delivered ? { status: "sent" } : { status: "skipped", reason: result.reason };
     } catch (error) {
+        const waitMinutes = retryAfterMinutes(error);
+        const attempts = (log.attempts || 0) + 1;
+
+        // Gmail said "later" -> keep it and try again automatically
+        if (waitMinutes && attempts < 8) {
+            const backoff = waitMinutes * Math.min(attempts, 4);
+            console.warn(`[email] ${template} -> ${email} will retry in ${backoff} min: ${String(error?.message || "").split("\n")[0]}`);
+            await EmailLog.updateOne(
+                { _id: log._id },
+                {
+                    status: "retry",
+                    attempts,
+                    nextAttemptAt: new Date(Date.now() + backoff * 60000),
+                    error: String(error?.message || error).slice(0, 500),
+                    payload: { to: email, template, data, category, user: user || null, dedupeKey, attachments, icalEvent },
+                }
+            );
+            return { status: "retry", reason: error?.message, pauseMinutes: waitMinutes };
+        }
+
         console.error(`[email] ${template} -> ${email} failed:`, error?.message);
-        // Free the dedupe key so a later retry can send it
+        // Free the dedupe key so a later send can try again
         await EmailLog.updateOne(
             { _id: log._id },
-            { status: "failed", error: String(error?.message || error).slice(0, 500), $unset: { dedupeKey: 1 } }
+            { status: "failed", attempts, error: String(error?.message || error).slice(0, 500), $unset: { dedupeKey: 1, payload: 1 } }
         );
         return { status: "failed", reason: error?.message };
     }
@@ -188,19 +218,62 @@ async function sendEmail({
 
 const queue = [];
 let running = false;
+let pausedUntil = 0; // when Gmail pushes back, stop sending for a while
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Save everything still waiting in memory as "retry" so nothing is lost */
+async function parkQueue(minutes) {
+    const waiting = queue.splice(0, queue.length);
+    const at = new Date(Date.now() + minutes * 60000);
+    for (const job of waiting) {
+        if (job._retryLogId) {
+            await EmailLog.updateOne({ _id: job._retryLogId }, { nextAttemptAt: at }).catch(() => null);
+            continue;
+        }
+        const email = String(job.to || "").trim().toLowerCase();
+        if (!isValidEmail(email) || job._skipTestLimit) continue;
+        try {
+            if (job.dedupeKey && (await EmailLog.exists({ dedupeKey: job.dedupeKey, status: { $in: ["sent", "queued", "retry"] } }))) continue;
+            await EmailLog.create({
+                template: job.template,
+                category: job.category || "essential",
+                user: job.user || null,
+                to: email,
+                status: "retry",
+                testMode: getConfig().testMode,
+                dedupeKey: job.dedupeKey || undefined,
+                nextAttemptAt: at,
+                error: "Waiting: email provider asked us to slow down",
+                payload: { ...job, to: email, _skipTestLimit: undefined, _retryLogId: undefined },
+            });
+        } catch (error) {
+            if (error?.code !== 11000) console.error("[email] park error:", error?.message);
+        }
+    }
+    if (waiting.length) console.warn(`[email] paused ${minutes} min - saved ${waiting.length} emails to retry`);
+}
+
 async function runQueue() {
     if (running) return;
+    if (Date.now() < pausedUntil) return;
     running = true;
     try {
         while (queue.length) {
             const job = queue.shift();
             try {
-                await sendEmail(job);
+                const result = await sendEmail(job);
+                if (result?.status === "retry") {
+                    // Stop hammering the provider: one failed login + 200 queued
+                    // emails = 200 more logins, which is what locks Gmail.
+                    const minutes = result.pauseMinutes || 15;
+                    pausedUntil = Date.now() + minutes * 60000;
+                    resetTransporter();
+                    await parkQueue(minutes);
+                    break;
+                }
             } catch (error) {
                 console.error("[email] queue job error:", error?.message);
             }
@@ -212,8 +285,52 @@ async function runQueue() {
     }
 }
 
+/**
+ * Called by a job every 5 minutes: send the emails that are waiting
+ * to be retried (oldest first, a batch at a time).
+ */
+async function retryDeferred({ limit = 60 } = {}) {
+    if (Date.now() < pausedUntil) return { retried: 0, pausedUntil: new Date(pausedUntil) };
+    const due = await EmailLog.find({ status: "retry", nextAttemptAt: { $lte: new Date() } })
+        .sort({ nextAttemptAt: 1 })
+        .limit(limit)
+        .select("_id payload")
+        .lean();
+    for (const log of due) {
+        if (!log.payload?.to || !log.payload?.template) {
+            await EmailLog.updateOne({ _id: log._id }, { status: "failed", error: "nothing saved to retry" });
+            continue;
+        }
+        queue.push({ ...log.payload, _retryLogId: log._id });
+    }
+    if (due.length) {
+        console.log(`[email] retrying ${due.length} delayed emails`);
+        setImmediate(runQueue);
+    }
+    return { retried: due.length };
+}
+
+/** For the admin page */
+async function queueStatus() {
+    const [retrying, failedToday] = await Promise.all([
+        EmailLog.countDocuments({ status: "retry" }),
+        EmailLog.countDocuments({ status: "failed", createdAt: { $gte: new Date(Date.now() - 86400000) } }),
+    ]);
+    return {
+        inMemory: queue.length,
+        retrying,
+        failedToday,
+        pausedUntil: Date.now() < pausedUntil ? new Date(pausedUntil) : null,
+    };
+}
+
 function queueEmail(options) {
     queue.push(options);
+    if (Date.now() < pausedUntil) {
+        // paused: save it for the retry job instead of holding it in memory
+        setImmediate(() => parkQueue(Math.ceil((pausedUntil - Date.now()) / 60000)));
+        return;
+    }
     setImmediate(runQueue);
 }
 
@@ -263,6 +380,8 @@ module.exports = {
     sendEmail,
     queueEmail,
     queueBulk,
+    retryDeferred,
+    queueStatus,
     safely,
     isValidEmail,
     render,

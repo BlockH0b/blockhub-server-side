@@ -14,17 +14,44 @@ function getTransporter() {
     const key = JSON.stringify(config.smtp || config.gmail.user || "");
     if (transporter && key === transporterKey) return transporter;
 
+    // ONE long-lived connection = ONE login. Gmail locks the account
+    // ("454 4.7.0 Too many login attempts") if we log in again and again.
     transporter = config.smtp
-        ? nodemailer.createTransport({ ...config.smtp, pool: true, maxConnections: 3 })
+        ? nodemailer.createTransport({ ...config.smtp, pool: true, maxConnections: 2, maxMessages: 500 })
         : nodemailer.createTransport({
             service: "gmail",
             pool: true,
-            maxConnections: 2,
+            maxConnections: 1,
+            maxMessages: 500,
             auth: { user: config.gmail.user, pass: config.gmail.pass },
         });
 
     transporterKey = key;
     return transporter;
+}
+
+/** Close the connection (after Gmail pushed back) so we start clean later */
+function resetTransporter() {
+    try {
+        transporter?.close();
+    } catch {
+        /* ignore */
+    }
+    transporter = null;
+    transporterKey = "";
+}
+
+/**
+ * Is this a "try again later" problem (Gmail busy / locked / quota),
+ * rather than a bad email address?  Returns minutes to wait, or 0.
+ */
+function retryAfterMinutes(error) {
+    const msg = `${error?.code || ""} ${error?.responseCode || ""} ${error?.message || error || ""}`;
+    if (/daily user sending limit|5\.4\.5|sending limit exceeded/i.test(msg)) return 180; // Gmail daily quota
+    if (/too many login attempts|4\.7\.0|454/i.test(msg)) return 30; // Gmail temporary login lock
+    if (/535|username and password not accepted|invalid credentials/i.test(msg)) return 60; // wrong app password
+    if (/\b421\b|\b45\d\b|4\.\d\.\d|ETIMEDOUT|ECONNECTION|ECONNRESET|ESOCKET|EDNS|greeting never received|connection closed/i.test(msg)) return 10;
+    return 0;
 }
 
 function escapeHtml(text) {
@@ -98,4 +125,4 @@ async function deliver(mail) {
     return { delivered: true, recipients, testMode, messageId: info?.messageId };
 }
 
-module.exports = { deliver, resolveRecipients, getTransporter };
+module.exports = { deliver, resolveRecipients, getTransporter, resetTransporter, retryAfterMinutes };

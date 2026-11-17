@@ -18,7 +18,7 @@
 
 const cron = require("node-cron");
 
-const { queueBulk } = require("./index");
+const { queueBulk, retryDeferred } = require("./index");
 const { getConfig } = require("./config");
 const notify = require("./notify");
 
@@ -381,6 +381,7 @@ function startEmailJobs() {
 
     const opts = { timezone: TZ };
     cron.schedule("*/5 * * * *", wrap("classReminders", classReminders), opts);
+    cron.schedule("1-59/5 * * * *", wrap("retryDelayedEmails", retryDelayedEmails), opts);
     cron.schedule("2-59/5 * * * *", wrap("meetingReminders", meetingReminders), opts);
     cron.schedule("*/30 * * * *", wrap("campaignsWentLive", campaignsWentLive), opts);
     cron.schedule("5 * * * *", wrap("campaignsEndingSoon", campaignsEndingSoon), opts);
@@ -390,6 +391,11 @@ function startEmailJobs() {
     cron.schedule("0 8 * * 1", wrap("weeklyDigest", weeklyDigest), opts);
 
     console.log("[email] scheduled emails started");
+}
+
+/* Send emails Gmail told us to retry later */
+async function retryDelayedEmails() {
+    return retryDeferred();
 }
 
 module.exports = {
@@ -404,5 +410,6 @@ module.exports = {
         campaignsEnded,
         ownerDailySummary,
         courseNudges,
+        retryDelayedEmails,
     },
 };

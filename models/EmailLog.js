@@ -23,7 +23,7 @@ const emailLogSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["queued", "sent", "failed", "skipped"],
+            enum: ["queued", "sent", "failed", "skipped", "retry"],
             default: "queued",
             index: true,
         },
@@ -36,6 +36,11 @@ const emailLogSchema = new mongoose.Schema(
         dedupeKey: { type: String, default: undefined },
 
         sentAt: { type: Date, default: null },
+
+        // Automatic retries when Gmail says "try again later"
+        attempts: { type: Number, default: 0 },
+        nextAttemptAt: { type: Date, default: null, index: true },
+        payload: { type: mongoose.Schema.Types.Mixed, default: undefined }, // what to send again
     },
     {
         timestamps: true,

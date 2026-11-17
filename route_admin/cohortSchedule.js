@@ -24,7 +24,7 @@ const CohortTutor = require("../models/CohortTutor");
 const CohortRegistration = require("../models/Cohort");
 const User = require("../models/user");
 const notify = require("../services/email/notify");
-const { sendEmail, queueBulk } = require("../services/email");
+const { sendEmail, queueBulk, queueStatus } = require("../services/email");
 const EmailLog = require("../models/EmailLog");
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { cleanMeetLink } = require("../utils/meetLink");
@@ -461,6 +461,66 @@ router.patch("/classes/:id", async (req, res) => {
     } catch (error) {
         console.error("[admin_cohort] update class", error);
         return res.status(500).json({ success: false, message: "Could not save the class." });
+    }
+});
+
+/* ------------------------------------------------------------
+   POST /classes/resend-links   { classId? }
+   Re-sends the "your class link" email to students who never got it
+   (e.g. Gmail blocked us). Students who already got it are skipped.
+------------------------------------------------------------ */
+router.post("/classes/resend-links", async (req, res) => {
+    try {
+        const cohort = req.body?.cohort || DEFAULT_COHORT;
+        const filter = { cohort, status: { $ne: "cancelled" }, meetingStatus: "available", meetingLink: { $ne: null } };
+        if (req.body?.classId) {
+            if (!mongoose.Types.ObjectId.isValid(req.body.classId)) {
+                return res.status(400).json({ success: false, message: "Invalid class." });
+            }
+            filter._id = req.body.classId;
+        } else {
+            const today = new Date();
+            today.setUTCHours(0, 0, 0, 0);
+            filter.startDate = { $gte: new Date(today.getTime() - 86400000), $lte: new Date(today.getTime() + 8 * 86400000) };
+        }
+        const classes = await CohortClass.find(filter).lean();
+        const upcoming = classes.filter((c) => (getClassEndsAt(c)?.getTime() || 0) > Date.now());
+        upcoming.forEach((c) => notify.classLinkReady(c, { changed: false }));
+        return res.json({
+            success: true,
+            message: upcoming.length
+                ? `Re-sending the link for ${upcoming.length} upcoming class${upcoming.length === 1 ? "" : "es"}. Students who already got it are skipped.`
+                : "No upcoming classes with a link to resend.",
+            data: { classes: upcoming.length },
+        });
+    } catch (error) {
+        console.error("[admin_cohort] resend links", error);
+        return res.status(500).json({ success: false, message: "Could not resend the links." });
+    }
+});
+
+/* ------------------------------------------------------------
+   GET /email-health   is email working right now?
+------------------------------------------------------------ */
+router.get("/email-health", async (req, res) => {
+    try {
+        const status = await queueStatus();
+        const lastError = await EmailLog.findOne({ status: { $in: ["failed", "retry"] } })
+            .sort({ updatedAt: -1 })
+            .select("error updatedAt template")
+            .lean();
+        return res.json({
+            success: true,
+            data: {
+                ...status,
+                lastError: lastError
+                    ? { message: String(lastError.error || "").split("\n")[0].slice(0, 200), at: lastError.updatedAt, template: lastError.template }
+                    : null,
+            },
+        });
+    } catch (error) {
+        console.error("[admin_cohort] email health", error);
+        return res.status(500).json({ success: false, message: "Could not check email." });
     }
 });
 

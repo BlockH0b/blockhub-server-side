@@ -72,7 +72,8 @@ function getConfig() {
         testMaxPerBatch: Number(process.env.EMAIL_TEST_MAX_PER_BATCH) || 5,
 
         disabled: bool(process.env.EMAIL_DISABLED, false),
-        ratePerMinute: Number(process.env.EMAIL_RATE_PER_MINUTE) || 120,
+        // Gmail gets nervous above ~30/min; a real provider can go faster
+        ratePerMinute: Number(process.env.EMAIL_RATE_PER_MINUTE) || (process.env.SMTP_HOST ? 120 : 30),
         jobsEnabled: bool(process.env.EMAIL_JOBS_ENABLED, true),
 
         frontendUrl: (process.env.FRONTEND_URL || "https://blockhubglobal.xyz").replace(/\/$/, ""),

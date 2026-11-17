@@ -42,6 +42,11 @@ function meetingDuration(minutes) {
 
 const first = (name) => (String(name || "").trim().split(/\s+/)[0] || "there");
 
+/** Button text for a class link (calendar invites open the event first) */
+function joinLabel(link) {
+    return /calendar|google\.com\/calendar/i.test(String(link || "")) ? "Open class invite" : "Join Google Meet";
+}
+
 /** "starts in 1 hour" style wording for a reminder sent `minutesLeft` before */
 function reminderWhen(minutesLeft) {
     const m = Number(minutesLeft) || 60;
@@ -128,7 +133,7 @@ const T = {
                 ["Duration", cls.duration],
             ]) +
             (cls.description ? p(esc(cls.description)) : "") +
-            (cls.meetLink ? button("Join Google Meet", cls.meetLink) : button("View my classes", `${ctx.frontendUrl}/cohort/my-dashboard`)) +
+            (cls.meetLink ? button(joinLabel(cls.meetLink), cls.meetLink) : button("View my classes", `${ctx.frontendUrl}/cohort/my-dashboard`)) +
             small("We'll remind you 1 day, 1 hour and 30 minutes before it starts."),
         text: `New class: ${cls.title} — ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}`,
     }),
@@ -182,7 +187,7 @@ const T = {
                     ["Duration", cls.duration],
                     ["Google Meet", meetLink || "Your tutor will add the link soon"],
                 ]) +
-                button(meetLink ? "Join Google Meet" : link ? "Open the class room" : "Open my dashboard", link || `${ctx.frontendUrl}/cohort/my-dashboard`) +
+                button(meetLink ? joinLabel(meetLink) : link ? "Open the class room" : "Open my dashboard", link || `${ctx.frontendUrl}/cohort/my-dashboard`) +
                 small(meetLink
                     ? "Join a few minutes early and sign in with your Google account. Only use the link from BlockHub emails or your dashboard."
                     : "The link will be in your dashboard and in your next reminder as soon as your tutor adds it."),
@@ -204,7 +209,7 @@ const T = {
                 ["Duration", cls.duration],
                 ["Google Meet", meetLink],
             ]) +
-            button("Join Google Meet", meetLink) +
+            button(joinLabel(meetLink), meetLink) +
             small("We'll remind you 1 day, 1 hour and 30 minutes before the class. The link is also on your dashboard."),
         text: `Google Meet link for ${cls.title} (${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}): ${meetLink}`,
     }),

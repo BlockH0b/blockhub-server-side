@@ -15,7 +15,15 @@ const DEFAULT_HOSTS = [
     "youtu.be",
     "calendar.app.google", // Google Calendar invite links
     "calendar.google.com",
+    "meet.app.goo.gl",
 ];
+
+/** Google links that live on a shared domain: only these paths are allowed */
+function isGoogleInvite(host, pathname) {
+    if (host === "google.com" && pathname.startsWith("/calendar")) return true; // google.com/calendar/event?eid=...
+    if (host === "g.co" && pathname.startsWith("/meet")) return true; // g.co/meet/abc-defg-hij
+    return false;
+}
 
 function allowedHosts() {
     const extra = String(process.env.MEET_LINK_HOSTS || "")
@@ -34,13 +42,17 @@ function cleanMeetLink(value) {
     try {
         url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
     } catch {
-        throw new Error("That doesn't look like a link. Paste the full Google Meet link, e.g. https://meet.google.com/abc-defg-hij");
+        throw new Error("That doesn't look like a link. Paste the full Google Meet or Google Calendar invite link.");
     }
 
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    const ok = allowedHosts().some((h) => host === h || host.endsWith(`.${h}`));
+    const ok =
+        allowedHosts().some((h) => host === h || host.endsWith(`.${h}`)) ||
+        isGoogleInvite(host, url.pathname);
     if (!ok) {
-        throw new Error("Only Google Meet links are allowed (e.g. https://meet.google.com/abc-defg-hij).");
+        throw new Error(
+            "Only meeting links are allowed: a Google Meet link (meet.google.com/...), a Google Calendar invite link (calendar.app.google/...), Zoom or Teams."
+        );
     }
 
     url.protocol = "https:";
