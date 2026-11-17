@@ -248,6 +248,84 @@ const T = {
         text: `It's D-Day! BlockHub Skills Cohort 1.0 onboarding call - ${date || "today"}${time ? ` at ${time}` : ""}.${link ? ` Join: ${link}` : ""}${note ? `\n\n${note}` : ""}`,
     }),
 
+    // ---------- Assignments ----------
+    assignment_new: ({ name, track, tutorName, a }, ctx) => ({
+        subject: `📝 New assignment: ${a.title} — ${track}`,
+        preheader: a.dueAt ? `Due ${fmtDate(a.dueAt)} at ${fmtTime(a.dueAt)}` : "Submit it on your BlockHub dashboard",
+        html:
+            eyebrow(`${track} · New assignment`) +
+            h1(a.title) +
+            p(`Hi ${esc(first(name))}, ${esc(tutorName || "your tutor")} gave your class a new assignment.`) +
+            details([
+                ["Due", a.dueAt ? `${fmtDate(a.dueAt)}, ${fmtTime(a.dueAt)}` : "No deadline"],
+                ["Hand in", [a.allowLink && "a link", a.allowFile && "a file", a.allowText && "a written answer"].filter(Boolean).join(", ")],
+            ]) +
+            quote(textToHtml(a.instructions), "#48FF75") +
+            (a.resourceLink ? p(`Resource: <a href="${esc(a.resourceLink)}" style="color:#0a7a2f">${esc(a.resourceLink)}</a>`) : "") +
+            button("Submit my assignment", `${ctx.frontendUrl}/cohort/my-dashboard?tab=assignments&assignment=${a.id}`) +
+            small("Submit on your dashboard. You can update your work until your tutor reviews it."),
+        text: `New assignment: ${a.title}\n\n${a.instructions}\n\nSubmit: ${ctx.frontendUrl}/cohort/my-dashboard?tab=assignments`,
+    }),
+
+    assignment_feedback: ({ name, track, title, status, grade, feedback, tutorName, assignmentId }, ctx) => ({
+        subject: `${status === "needs_changes" ? "✏️ Changes requested" : "✅ Reviewed"}: ${title}`,
+        preheader: grade ? `Grade: ${grade}` : "Your tutor reviewed your assignment",
+        html:
+            eyebrow(`${track} · Assignment feedback`) +
+            h1(status === "needs_changes" ? "Your tutor asked for a few changes" : "Your assignment was reviewed") +
+            p(`Hi ${esc(first(name))}, ${esc(tutorName || "your tutor")} reviewed <strong style="color:#0a0a0a">${esc(title)}</strong>.`) +
+            details([["Result", status === "needs_changes" ? "Needs changes" : "Reviewed"], ["Grade", grade || ""]]) +
+            (feedback ? quote(textToHtml(feedback), status === "needs_changes" ? "#f59e0b" : "#48FF75") : "") +
+            button(status === "needs_changes" ? "Update my work" : "See it on my dashboard", `${ctx.frontendUrl}/cohort/my-dashboard?tab=assignments&assignment=${assignmentId}`),
+        text: `${title}: ${status}${grade ? ` (${grade})` : ""}\n\n${feedback || ""}`,
+    }),
+
+    // ---------- Support tickets ----------
+    ticket_to_tutor: ({ name, studentName, track, subject, message, ticketId, isNew }, ctx) => ({
+        subject: `${isNew ? "🎫 New question" : "💬 Reply"} from ${studentName}: ${subject}`,
+        preheader: String(message || "").slice(0, 110),
+        html:
+            eyebrow(`${track} · Student ${isNew ? "question" : "reply"}`) +
+            h1(subject) +
+            p(`Hi ${esc(first(name))}, <strong style="color:#0a0a0a">${esc(studentName)}</strong> ${isNew ? "sent you a question" : "replied"}:`) +
+            quote(textToHtml(message), "#48FF75") +
+            button("Reply on my dashboard", `${ctx.frontendUrl}/cohort/tutor-dashboard?tab=tickets&ticket=${ticketId}`) +
+            small("Please don't reply to this email directly. Click the button so your answer reaches the student."),
+        text: `${studentName}: ${subject}\n\n${message}\n\nReply: ${ctx.frontendUrl}/cohort/tutor-dashboard?tab=tickets&ticket=${ticketId}`,
+    }),
+
+    ticket_to_student: ({ name, tutorName, track, subject, message, ticketId }, ctx) => ({
+        subject: `💬 ${tutorName || "Your tutor"} replied: ${subject}`,
+        preheader: String(message || "").slice(0, 110),
+        html:
+            eyebrow(`${track} · Tutor reply`) +
+            h1(subject) +
+            p(`Hi ${esc(first(name))}, ${esc(tutorName || "your tutor")} answered your question:`) +
+            quote(textToHtml(message), "#48FF75") +
+            button("Open the conversation", `${ctx.frontendUrl}/cohort/my-dashboard?tab=support&ticket=${ticketId}`) +
+            small("Need more help? Reply from your dashboard and your tutor gets an email."),
+        text: `${tutorName} replied: ${subject}\n\n${message}\n\n${ctx.frontendUrl}/cohort/my-dashboard?tab=support&ticket=${ticketId}`,
+    }),
+
+    // ---------- Copy of every class link for the BlockHub team ----------
+    class_link_copy: ({ track, cls, meetLink, tutorName, changed }, ctx) => ({
+        subject: `[Class link${changed ? " changed" : ""}] ${track} · ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}`,
+        preheader: `${cls.title} · ${meetLink}`,
+        html:
+            eyebrow(`${track} · Team copy`) +
+            h1(cls.title) +
+            p(`${esc(tutorName || "A tutor")} ${changed ? "changed" : "added"} the class link. Students in the track have been emailed.`) +
+            details([
+                ["Track", track],
+                ["Date", fmtDate(cls.startsAt)],
+                ["Time", fmtTime(cls.startsAt)],
+                ["Duration", cls.duration],
+                ["Link", meetLink],
+            ]) +
+            button("Join the class", meetLink),
+        text: `${track} ${cls.title} ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}: ${meetLink}`,
+    }),
+
     // Admin "Email a track" message
     admin_message: ({ name, track, subject, message, senderName }, ctx) => ({
         subject: subject,

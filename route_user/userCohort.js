@@ -323,11 +323,11 @@ router.get(
 
             const cohortStartDate =
                 process.env.COHORT_1_START_DATE ||
-                "2026-10-27T18:00:00.000Z";
+                "2026-11-16T18:30:00.000Z"; // onboarding night, 7:30 PM WAT
 
             const cohortEndDate =
                 process.env.COHORT_1_END_DATE ||
-                "2026-12-18T18:00:00.000Z";
+                "2027-03-14T22:00:00.000Z"; // ~16 weeks of classes
 
             const cohortStatus =
                 getCohortStatus(
@@ -561,6 +561,12 @@ router.get(
 
                         name:
                             "BlockHub Cohort 1.0",
+
+                        // "Day 3 of the cohort"
+                        day: Math.max(
+                            1,
+                            Math.floor((Date.now() - new Date(cohortStartDate).getTime()) / 86400000) + 1
+                        ),
 
                         status:
                             cohortStatus,

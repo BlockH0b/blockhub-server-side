@@ -553,8 +553,20 @@ function onboardingData(body) {
     const time = String(body?.time || "").trim().slice(0, 60);
     const date = String(body?.date || "").trim().slice(0, 60);
     const note = String(body?.note || "").trim().slice(0, 2000);
+    // Onboarding email: any https link is fine (calendar invite, Meet, etc).
+    // Only admins can send this, so no site restriction here.
     let link = null;
-    if (body?.link) link = cleanMeetLink(body.link); // throws a friendly error
+    const raw = String(body?.link || "").trim();
+    if (raw) {
+        let url;
+        try {
+            url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+        } catch {
+            throw new Error("That doesn't look like a link. Paste the full link, e.g. https://calendar.app.google/...");
+        }
+        url.protocol = "https:";
+        link = url.toString();
+    }
     return { time, date, note, link };
 }
 

@@ -239,6 +239,24 @@ function classLinkReady(classDoc, { changed = false } = {}) {
             dedupePrefix: `class-link:${classDoc._id}:${linkKey}`,
             data: { track: classDoc.track, cls, meetLink: cls.meetLink, changed },
         });
+
+        // Copy for the BlockHub team so someone can attend / keep an eye on it
+        const teamEmails = String(process.env.MEETING_COPY_EMAIL || "block.hub.mailer@gmail.com")
+            .split(",")
+            .map((e) => e.trim())
+            .filter(Boolean);
+        if (teamEmails.length) {
+            const tutor = classDoc.tutor ? await userContact(classDoc.tutor) : null;
+            queueBulk(
+                teamEmails.map((email) => ({ email, name: "BlockHub team" })),
+                {
+                    template: "class_link_copy",
+                    category: "essential",
+                    dedupePrefix: `class-link-copy:${classDoc._id}:${linkKey}`,
+                    data: { track: classDoc.track, cls, meetLink: cls.meetLink, tutorName: tutor?.name, changed },
+                }
+            );
+        }
     }, "notify.classLinkReady");
 }
 
@@ -269,6 +287,107 @@ async function trackMessage({ cohort, tracks = [], subject, message, senderName,
         });
     }
     return queued;
+}
+
+/* ------------------------------------------------------------
+   Assignments + support tickets
+------------------------------------------------------------ */
+function assignmentInfo(a) {
+    return {
+        id: String(a._id),
+        title: a.title,
+        instructions: a.instructions,
+        resourceLink: a.resourceLink || null,
+        dueAt: a.dueAt || null,
+        allowLink: a.allowLink !== false,
+        allowFile: a.allowFile !== false,
+        allowText: a.allowText !== false,
+    };
+}
+
+/** New assignment -> every student in the track */
+function assignmentPosted(assignment, tutorUser) {
+    safely(async () => {
+        const students = await trackStudents(assignment.cohort, assignment.track);
+        queueBulk(students, {
+            template: "assignment_new",
+            category: "classUpdates",
+            dedupePrefix: `assignment:${assignment._id}`,
+            data: { track: assignment.track, tutorName: tutorUser?.fullName, a: assignmentInfo(assignment) },
+        });
+    }, "notify.assignmentPosted");
+}
+
+/** Tutor reviewed a submission -> that student */
+function submissionReviewed(submission, assignment, tutorUser) {
+    safely(async () => {
+        if (!submission.studentEmail) return;
+        queueBulk(
+            [{ userId: String(submission.student), email: submission.studentEmail, name: submission.studentName }],
+            {
+                template: "assignment_feedback",
+                category: "essential",
+                dedupePrefix: `assignment-review:${submission._id}:${Date.now()}`,
+                data: {
+                    track: submission.track,
+                    title: assignment.title,
+                    assignmentId: String(assignment._id),
+                    status: submission.status,
+                    grade: submission.grade,
+                    feedback: submission.feedback,
+                    tutorName: tutorUser?.fullName,
+                },
+            }
+        );
+    }, "notify.submissionReviewed");
+}
+
+/** Student opened / replied to a ticket -> the track tutor(s) */
+function ticketToTutors(ticket, message, isNew) {
+    safely(async () => {
+        const tutors = await M.CohortTutor.find({ cohort: ticket.cohort, track: ticket.track, status: "active" })
+            .populate("user", "_id fullName email")
+            .lean();
+        const people = tutors
+            .filter((t) => t.user?.email)
+            .map((t) => ({ userId: String(t.user._id), email: t.user.email, name: t.user.fullName }));
+        if (!people.length) return;
+        queueBulk(people, {
+            template: "ticket_to_tutor",
+            category: "essential",
+            dedupePrefix: `ticket:${ticket._id}:${message._id || Date.now()}`,
+            data: {
+                studentName: ticket.studentName || "A student",
+                track: ticket.track,
+                subject: ticket.subject,
+                message: message.body,
+                ticketId: String(ticket._id),
+                isNew,
+            },
+        });
+    }, "notify.ticketToTutors");
+}
+
+/** Tutor replied -> the student */
+function ticketToStudent(ticket, message, tutorUser) {
+    safely(async () => {
+        if (!ticket.studentEmail) return;
+        queueBulk(
+            [{ userId: String(ticket.student), email: ticket.studentEmail, name: ticket.studentName }],
+            {
+                template: "ticket_to_student",
+                category: "essential",
+                dedupePrefix: `ticket-reply:${ticket._id}:${message._id || Date.now()}`,
+                data: {
+                    tutorName: tutorUser?.fullName,
+                    track: ticket.track,
+                    subject: ticket.subject,
+                    message: message.body,
+                    ticketId: String(ticket._id),
+                },
+            }
+        );
+    }, "notify.ticketToStudent");
 }
 
 /** Tutor started a live class - email students not already in it */
@@ -607,6 +726,10 @@ module.exports = {
     classCancelled,
     classLinkReady,
     trackMessage,
+    assignmentPosted,
+    submissionReviewed,
+    ticketToTutors,
+    ticketToStudent,
     classLive,
     missedClass,
     tutorAssigned,
