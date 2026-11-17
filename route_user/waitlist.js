@@ -10,6 +10,53 @@ const cloudinary = require('../utils/cloudinary');
 
 
 const SERVER_URL = process.env.SERVER_URL || "http://localhost:8080";
+const path = require("path");
+
+/*
+ * SECURITY: the profile picture URL comes from the browser, and canvas
+ * will happily open ANY path or URL (file:///etc/passwd, our own server,
+ * the cloud metadata address...). People were trying exactly that.
+ * So we only download https images from known avatar hosts ourselves,
+ * with a size + time limit, and hand canvas the bytes.
+ */
+const AVATAR_HOSTS = [
+    "pbs.twimg.com",
+    "abs.twimg.com",
+    "res.cloudinary.com",
+    "lh3.googleusercontent.com",
+    "googleusercontent.com",
+    "avatars.githubusercontent.com",
+    "cdn.discordapp.com",
+];
+const MAX_AVATAR_BYTES = 3 * 1024 * 1024;
+
+async function fetchAvatar(value) {
+    let url;
+    try {
+        url = new URL(String(value || ""));
+    } catch {
+        throw Object.assign(new Error("Invalid profile image"), { status: 400 });
+    }
+    const host = url.hostname.toLowerCase();
+    const allowed = url.protocol === "https:" && AVATAR_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+    if (!allowed) throw Object.assign(new Error("Profile image must be your X/Google profile photo"), { status: 400 });
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+        const res = await fetch(url.toString(), { signal: controller.signal, redirect: "error" });
+        if (!res.ok) throw new Error("Could not download profile image");
+        const type = res.headers.get("content-type") || "";
+        if (!/^image\/(png|jpe?g|webp|gif)/i.test(type)) throw new Error("Profile image is not a picture");
+        const size = Number(res.headers.get("content-length") || 0);
+        if (size > MAX_AVATAR_BYTES) throw new Error("Profile image is too big");
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length > MAX_AVATAR_BYTES) throw new Error("Profile image is too big");
+        return buffer;
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 router.post('/waitlist', async (req, res) => {
     console.log("📥 Incoming request to /waitlist");
@@ -75,10 +122,18 @@ router.get('/waitlist-count', async (req, res) => {
 router.post("/generate-image", async (req, res) => {
     try {
         const { createCanvas, loadImage } = require("canvas");
-        const { name, profileImage } = req.body;
+        const { profileImage } = req.body;
+        const name = String(req.body?.name || "").trim().slice(0, 40);
 
         if (!name || !profileImage) {
             return res.status(400).json({ message: "Name and profile image are required" });
+        }
+
+        let avatar;
+        try {
+            avatar = await fetchAvatar(profileImage);
+        } catch (e) {
+            return res.status(e.status || 400).json({ message: e.message || "Could not use that profile image" });
         }
 
         const width = 1200;
@@ -93,8 +148,8 @@ router.post("/generate-image", async (req, res) => {
         const radius = 160 * scale;
 
         // Load images
-        const template = await loadImage("uploads/image.png");
-        const userPic = await loadImage(profileImage);
+        const template = await loadImage(path.join(__dirname, "..", "uploads", "image.png"));
+        const userPic = await loadImage(avatar);
 
         // Draw template
         ctx.drawImage(template, 0, 0, width * scale, height * scale);
@@ -136,8 +191,8 @@ router.post("/generate-image", async (req, res) => {
         res.json({ imageUrl: result.secure_url });
 
     } catch (err) {
-        console.error("Error:", err);
-        res.status(500).json({ message: "Server error", error: err.message });
+        console.error("[waitlist] generate-image:", err?.message);
+        res.status(500).json({ message: "Could not create your image. Please try again." });
     }
 });
 

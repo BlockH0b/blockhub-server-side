@@ -285,6 +285,24 @@ async function runQueue() {
     }
 }
 
+/** Some emails are useless if they arrive late - don't send them */
+function staleReason(payload) {
+    const now = Date.now();
+    const cls = payload?.data?.cls;
+    const startsAt = cls?.startsAt ? new Date(cls.startsAt).getTime() : null;
+    const endsAt = cls?.endsAt ? new Date(cls.endsAt).getTime() : null;
+    if (["class_reminder", "tutor_link_missing"].includes(payload.template) && startsAt && startsAt < now) {
+        return "class already started - reminder no longer useful";
+    }
+    if (["class_link_ready", "class_link_copy"].includes(payload.template) && (endsAt || startsAt) && (endsAt || startsAt) < now) {
+        return "class already over";
+    }
+    if (/login_link|otp/i.test(payload.template)) {
+        return "login link too old - the user can request a new one";
+    }
+    return null;
+}
+
 /**
  * Called by a job every 5 minutes: send the emails that are waiting
  * to be retried (oldest first, a batch at a time).
@@ -299,6 +317,11 @@ async function retryDeferred({ limit = 60 } = {}) {
     for (const log of due) {
         if (!log.payload?.to || !log.payload?.template) {
             await EmailLog.updateOne({ _id: log._id }, { status: "failed", error: "nothing saved to retry" });
+            continue;
+        }
+        const stale = staleReason(log.payload);
+        if (stale) {
+            await EmailLog.updateOne({ _id: log._id }, { status: "skipped", skipReason: stale, $unset: { payload: 1 } });
             continue;
         }
         queue.push({ ...log.payload, _retryLogId: log._id });

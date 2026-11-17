@@ -44,8 +44,16 @@ dns.setDefaultResultOrder("ipv4first");
 const { allowedOrigins } = require('./confiq/origins');
 
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// ---- Shield: security headers, rate limit, bans, attack blocking ----
+const { securityHeaders, shieldEarly, shieldInspect } = require('./middlewave/shield');
+app.set("trust proxy", 1); // real visitor IP behind Render
+app.disable("x-powered-by");
+app.use(securityHeaders);
+app.use(shieldEarly);
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(shieldInspect);
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(cookieParser());
@@ -157,6 +165,8 @@ app.use('/user_cohort/login', loginLimit);
 app.use('/user_cohort/login-link', rateLimit({ max: 5, windowMinutes: 15 }));
 app.use('/user_cohort/register', rateLimit({ max: 10, windowMinutes: 60 }));
 app.use('/cohort_student/tickets', rateLimit({ max: 30, windowMinutes: 15 }));
+app.use('/user_waitlist/generate-image', rateLimit({ max: 5, windowMinutes: 15 }));
+app.use('/user_waitlist/waitlist', rateLimit({ max: 5, windowMinutes: 15 }));
 app.use('/cohort_student/assignments', rateLimit({ max: 30, windowMinutes: 15 }));
 app.use('/tutor_auth/login-tutor', loginLimit);
 app.use('/project_auth/login', loginLimit);
