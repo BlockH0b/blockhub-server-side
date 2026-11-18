@@ -214,6 +214,7 @@ app.use('/tutor_dashboard', require('./route_tutor/dashboard'));
 app.use('/tutor_cohort', require('./route_tutor/cohort'));
 app.use('/tutor_work', require('./route_tutor/cohortWork'));       // assignments + student questions (tutor)
 app.use('/cohort_student', require('./route_user/cohortWork'));   // assignments + questions (student)
+app.use('/materials', require('./route_materials/materials')); // password-protected slides + notes
 
 
 // Tutor routes
