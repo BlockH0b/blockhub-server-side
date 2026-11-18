@@ -134,7 +134,7 @@ const T = {
             ]) +
             (cls.description ? p(esc(cls.description)) : "") +
             (cls.meetLink ? button(joinLabel(cls.meetLink), cls.meetLink) : button("View my classes", `${ctx.frontendUrl}/cohort/my-dashboard`)) +
-            small("We'll remind you 1 day, 1 hour and 30 minutes before it starts."),
+            small("We'll remind you 1 hour before it starts."),
         text: `New class: ${cls.title} — ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}`,
     }),
 
@@ -169,7 +169,7 @@ const T = {
         text: `Cancelled: ${cls.title} (${fmtDate(cls.startsAt)})`,
     }),
 
-    // Sent 1 day, 1 hour and 30 minutes before a class (see jobs.js).
+    // Sent 1 hour before a class (see jobs.js).
     // meetLink = the Google Meet link the tutor added.
     class_reminder: ({ name, track, cls, joinUrl, meetLink, minutesLeft }, ctx) => {
         const when = reminderWhen(minutesLeft);
@@ -195,6 +195,29 @@ const T = {
         };
     },
 
+    // Part 2 / Part 3 link (e.g. Google Meet stopped at 60 minutes)
+    class_extra_link: ({ name, track, cls, url, label, live }, ctx) => ({
+        subject: `${live ? "🔴 Rejoin now" : "New link"}: ${label} of ${cls.title} — ${track}`,
+        preheader: live ? "The class continues on a new link. Tap to rejoin." : `${fmtDate(cls.startsAt)} at ${fmtTime(cls.startsAt)}`,
+        html:
+            eyebrow(`${track} · ${label}`) +
+            h1(live ? "The class continues on a new link" : `New link for ${label}`) +
+            p(
+                live
+                    ? `Hi ${esc(first(name))}, our call ended (Google Meet stops after 60 minutes) and <strong style="color:#0a0a0a">${esc(cls.title)}</strong> continues on this link. Tap to rejoin.`
+                    : `Hi ${esc(first(name))}, your tutor added a link for <strong style="color:#0a0a0a">${esc(label)}</strong> of ${esc(cls.title)}.`
+            ) +
+            details([
+                ["Class", cls.title],
+                ["Part", label],
+                ["Date", fmtDate(cls.startsAt)],
+                ["Link", url],
+            ]) +
+            button(live ? `Rejoin (${label})` : `Open ${label}`, url) +
+            small("The link is also on your BlockHub dashboard under the class."),
+        text: `${label} of ${cls.title}: ${url}`,
+    }),
+
     // Tutor added (or changed) the Google Meet link of a class
     class_link_ready: ({ name, track, cls, meetLink, changed }, ctx) => ({
         subject: `${changed ? "New link" : "Class link"}: ${cls.title} — ${fmtDate(cls.startsAt)}`,
@@ -210,7 +233,7 @@ const T = {
                 ["Google Meet", meetLink],
             ]) +
             button(joinLabel(meetLink), meetLink) +
-            small("We'll remind you 1 day, 1 hour and 30 minutes before the class. The link is also on your dashboard."),
+            small("We'll remind you 1 hour before the class. The link is also on your dashboard."),
         text: `Google Meet link for ${cls.title} (${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}): ${meetLink}`,
     }),
 

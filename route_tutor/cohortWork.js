@@ -29,6 +29,8 @@ const CohortSubmission = require("../models/CohortSubmission");
 const CohortTicket = require("../models/CohortTicket");
 const CohortRegistration = require("../models/Cohort");
 const notify = require("../services/email/notify");
+const CohortClass = require("../models/CohortClass");
+const { addClassLink, removeClassLink, formatExtraLinks } = require("../utils/classLinks");
 
 const router = express.Router();
 router.use(requireCohortTutor);
@@ -305,6 +307,53 @@ router.patch("/submissions/:id", async (req, res) => {
     } catch (error) {
         console.error("[tutor_work] review", error);
         return res.status(500).json({ success: false, message: "Unable to save the review." });
+    }
+});
+
+/* ============================================================
+   EXTRA CLASS LINKS (Part 2 / Part 3)
+   POST   /classes/:id/links         { link, label? }  emails students
+   DELETE /classes/:id/links/:index
+============================================================ */
+
+router.post("/classes/:id/links", async (req, res) => {
+    try {
+        if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid class." });
+        const classItem = await CohortClass.findOne({ _id: req.params.id, cohort: req.cohort, track: req.track });
+        if (!classItem) return res.status(404).json({ success: false, message: "Class not found." });
+        if (!classItem.tutor) classItem.tutor = req.user._id;
+
+        let added;
+        try {
+            added = await addClassLink(classItem, { link: req.body?.link, label: req.body?.label });
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
+        return res.json({
+            success: true,
+            message: `${added.label} link added. Students are being emailed now.`,
+            data: { meetingLink: classItem.meetingLink, extraLinks: formatExtraLinks(classItem) },
+        });
+    } catch (error) {
+        console.error("[tutor_work] add link", error);
+        return res.status(500).json({ success: false, message: "Unable to add the link." });
+    }
+});
+
+router.delete("/classes/:id/links/:index", async (req, res) => {
+    try {
+        if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid class." });
+        const classItem = await CohortClass.findOne({ _id: req.params.id, cohort: req.cohort, track: req.track });
+        if (!classItem) return res.status(404).json({ success: false, message: "Class not found." });
+        try {
+            await removeClassLink(classItem, req.params.index);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
+        return res.json({ success: true, message: "Link removed.", data: { extraLinks: formatExtraLinks(classItem) } });
+    } catch (error) {
+        console.error("[tutor_work] remove link", error);
+        return res.status(500).json({ success: false, message: "Unable to remove the link." });
     }
 });
 

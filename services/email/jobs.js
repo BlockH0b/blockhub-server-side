@@ -2,7 +2,7 @@
  * ============================================================
  * Scheduled emails (node-cron, Lagos time)
  * ============================================================
- *   every 5 min  - class reminders (1 day, 1 hour, 30 min before)
+ *   every 5 min  - class reminders (1 hour before)
  *   every 5 min  - BlockHub Meetings reminders (1 hour before)
  *   every 30 min - "new campaign is live"
  *   hourly       - campaign ending in 24h / campaign ended
@@ -52,13 +52,14 @@ async function contactsFor(userIds) {
 }
 
 /* ------------------------------------------------------------
-   1. Class reminders - 1 day, 1 hour and 30 minutes before
-   Change with CLASS_REMINDER_MINUTES=1440,60,30
+   1. Class reminders - 1 hour before (only one, to stay under the
+   daily email limit). Add more later with CLASS_REMINDER_MINUTES,
+   e.g. CLASS_REMINDER_MINUTES=1440,60,30 for 1 day, 1 hour and 30 min.
    Each reminder carries the Google Meet link if the tutor added it.
    If a class still has no link 1 day / 1 hour before, the tutor
    gets a "please add your link" email.
 ------------------------------------------------------------ */
-const REMINDER_MINUTES = String(process.env.CLASS_REMINDER_MINUTES || "1440,60,30")
+const REMINDER_MINUTES = String(process.env.CLASS_REMINDER_MINUTES || "60")
     .split(",")
     .map((v) => Number(v.trim()))
     .filter((v) => Number.isFinite(v) && v > 0);

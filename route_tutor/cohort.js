@@ -14,6 +14,8 @@ const { getLiveSessionMap } = require("../services/liveClass.helpers");
 const notify = require("../services/email/notify");
 const googleMeet = require("../services/googleMeet.service");
 const { cleanMeetLink } = require("../utils/meetLink");
+const { renumberSoon } = require("../utils/classNumbers");
+const { formatExtraLinks } = require("../utils/classLinks");
 
 /*
 |--------------------------------------------------------------------------
@@ -91,6 +93,16 @@ function cleanUrl(value) {
 */
 
 router.use(requireCohortTutor);
+
+// After any class is created / moved / deleted, keep numbers 1, 2, 3...
+router.use((req, res, next) => {
+  if (req.method !== "GET" && /^\/classes/.test(req.path)) {
+    res.on("finish", () => {
+      if (res.statusCode < 400) renumberSoon(req.cohort, req.track);
+    });
+  }
+  next();
+});
 
 
 /*
@@ -269,6 +281,9 @@ router.get("/dashboard", async (req, res) => {
 
         recordingLink:
           classItem.recordingLink || null,
+
+        // Part 2 / Part 3 links
+        extraLinks: formatExtraLinks(classItem),
 
         emailStudents:
           classItem.emailStudents !== false,
@@ -551,7 +566,8 @@ router.post("/classes", async (req, res) => {
      * ------------------------------------------------------
      */
 
-    if (classNumber) {
+    // Class numbers are now set automatically (utils/classNumbers.js)
+    if (false && classNumber) {
       const existingClass =
         await CohortClass.findOne({
           cohort: req.cohort,

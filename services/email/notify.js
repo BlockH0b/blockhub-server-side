@@ -260,6 +260,25 @@ function classLinkReady(classDoc, { changed = false } = {}) {
     }, "notify.classLinkReady");
 }
 
+/** Tutor/admin added a Part 2 / Part 3 link -> email the track now */
+function classExtraLink(classDoc, { url, label }) {
+    safely(async () => {
+        if (emailsOff(classDoc) || classDoc.status === "cancelled") return;
+        const cls = classInfo(classDoc);
+        if (cls.endsAt && cls.endsAt < new Date()) return;
+        const key = require("crypto").createHash("sha1").update(url).digest("hex").slice(0, 12);
+        const students = await trackStudents(classDoc.cohort, classDoc.track);
+        const now = Date.now();
+        const live = cls.startsAt && cls.startsAt.getTime() <= now && (!cls.endsAt || cls.endsAt.getTime() > now);
+        queueBulk(students, {
+            template: "class_extra_link",
+            category: "essential",
+            dedupePrefix: `class-extra:${classDoc._id}:${key}`,
+            data: { track: classDoc.track, cls, url, label, live },
+        });
+    }, "notify.classExtraLink");
+}
+
 /**
  * Admin "Email a track". tracks = ["Data Analytics", ...] (empty = every track).
  * Returns how many emails were queued.
@@ -725,6 +744,7 @@ module.exports = {
     classUpdated,
     classCancelled,
     classLinkReady,
+    classExtraLink,
     trackMessage,
     assignmentPosted,
     submissionReviewed,

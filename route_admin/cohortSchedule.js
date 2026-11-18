@@ -28,10 +28,26 @@ const { sendEmail, queueBulk, queueStatus } = require("../services/email");
 const EmailLog = require("../models/EmailLog");
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { cleanMeetLink } = require("../utils/meetLink");
+const { renumberClasses } = require("../utils/classNumbers");
+const { addClassLink, removeClassLink, formatExtraLinks } = require("../utils/classLinks");
 const { COHORT_TRACKS, normalizeTrack } = require("../config/cohortTracks");
 
 const router = express.Router();
 router.use(requireAdmin);
+
+// Any change to classes -> keep class numbers 1, 2, 3... per track
+router.use((req, res, next) => {
+    if (req.method !== "GET" && /^\/(classes|schedule)/.test(req.path)) {
+        res.on("finish", () => {
+            if (res.statusCode < 400) {
+                renumberClasses({ cohort: req.body?.cohort || DEFAULT_COHORT }).catch((e) =>
+                    console.error("[admin_cohort] renumber", e?.message)
+                );
+            }
+        });
+    }
+    next();
+});
 
 const DEFAULT_COHORT = process.env.DEFAULT_COHORT || "cohort-1.0";
 
@@ -105,6 +121,7 @@ function formatClass(c, tutorMap, studentCounts) {
         endsAt,
         meetingLink: c.meetingLink,
         meetingStatus: c.meetingStatus,
+        extraLinks: formatExtraLinks(c),
         recordingLink: c.recordingLink,
         status: c.status,
         emailStudents: c.emailStudents !== false,
@@ -496,6 +513,70 @@ router.post("/classes/resend-links", async (req, res) => {
     } catch (error) {
         console.error("[admin_cohort] resend links", error);
         return res.status(500).json({ success: false, message: "Could not resend the links." });
+    }
+});
+
+/* ------------------------------------------------------------
+   POST /schedule/renumber   fix class numbers now (1, 2, 3... per track)
+------------------------------------------------------------ */
+router.post("/schedule/renumber", async (req, res) => {
+    try {
+        const result = await renumberClasses({ cohort: req.body?.cohort || DEFAULT_COHORT });
+        return res.json({
+            success: true,
+            message: result.changed ? `Fixed ${result.changed} classes. Every track now starts at Class 1.` : "All class numbers were already correct.",
+            data: result,
+        });
+    } catch (error) {
+        console.error("[admin_cohort] renumber", error);
+        return res.status(500).json({ success: false, message: "Could not fix the class numbers." });
+    }
+});
+
+/* ------------------------------------------------------------
+   POST   /classes/:id/links          { link, label? }  Part 2 / Part 3
+   DELETE /classes/:id/links/:index
+------------------------------------------------------------ */
+router.post("/classes/:id/links", async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: "Invalid class." });
+        }
+        const classItem = await CohortClass.findById(req.params.id);
+        if (!classItem) return res.status(404).json({ success: false, message: "Class not found." });
+        let added;
+        try {
+            added = await addClassLink(classItem, { link: req.body?.link, label: req.body?.label });
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
+        return res.json({
+            success: true,
+            message: `${added.label} link added. Students are being emailed now.`,
+            data: { meetingLink: classItem.meetingLink, meetingStatus: classItem.meetingStatus, extraLinks: formatExtraLinks(classItem) },
+        });
+    } catch (error) {
+        console.error("[admin_cohort] add link", error);
+        return res.status(500).json({ success: false, message: "Could not add the link." });
+    }
+});
+
+router.delete("/classes/:id/links/:index", async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: "Invalid class." });
+        }
+        const classItem = await CohortClass.findById(req.params.id);
+        if (!classItem) return res.status(404).json({ success: false, message: "Class not found." });
+        try {
+            await removeClassLink(classItem, req.params.index);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: e.message });
+        }
+        return res.json({ success: true, message: "Link removed.", data: { extraLinks: formatExtraLinks(classItem) } });
+    } catch (error) {
+        console.error("[admin_cohort] remove link", error);
+        return res.status(500).json({ success: false, message: "Could not remove the link." });
     }
 });
 

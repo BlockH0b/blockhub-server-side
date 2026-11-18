@@ -38,6 +38,12 @@ function esc(value) {
 /** Plain text -> safe HTML paragraphs (keeps line breaks) */
 function textToHtml(text) {
     return esc(text)
+        // make web links clickable (e.g. download links in announcements)
+        .replace(/https?:\/\/(?:(?!&quot;|&lt;|&gt;)[^\s<])+/g, (url) => {
+            const clean = url.replace(/[.,;:!?)\]']+$/, "");
+            const rest = url.slice(clean.length);
+            return `<a href="${clean}" target="_blank" style="color:#0a7a3d;text-decoration:underline">${clean}</a>${rest}`;
+        })
         .split(/\n{2,}/)
         .map((para) => para.replace(/\n/g, "<br/>"))
         .join("<br/><br/>");

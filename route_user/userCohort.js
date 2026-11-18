@@ -19,6 +19,7 @@ const CohortTutor = require("../models/CohortTutor");
 const CohortAnnouncement = require("../models/CohortAnnouncement");
 const { getClassStartsAt, getClassEndsAt } = require("../utils/classTime");
 const { getLiveSessionMap } = require("../services/liveClass.helpers");
+const { formatExtraLinks } = require("../utils/classLinks");
 
 
 // ==========================================
@@ -205,6 +206,12 @@ router.get(
                     recordingLink:
                         classItem.recordingLink || null,
 
+                    // Part 2 / Part 3 links (when Google Meet stops at 60 min)
+                    extraLinks:
+                        classItem.meetingStatus === "available"
+                            ? formatExtraLinks(classItem)
+                            : [],
+
                     status: mapClassStatus(classItem),
                 })
             );
@@ -268,6 +275,11 @@ router.get(
                             "available"
                             ? upcomingClass.meetingLink
                             : null,
+
+                    extraLinks:
+                        upcomingClass.meetingStatus === "available"
+                            ? formatExtraLinks(upcomingClass)
+                            : [],
 
                     status:
                         mapClassStatus(upcomingClass),

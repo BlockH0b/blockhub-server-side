@@ -99,6 +99,19 @@ const cohortClassSchema = new mongoose.Schema(
             trim: true,
         },
 
+        // Extra meeting links: Part 2, Part 3 (free Google Meet stops after 60 min)
+        extraLinks: {
+            type: [
+                {
+                    url: { type: String, trim: true },
+                    label: { type: String, trim: true },
+                    addedAt: { type: Date, default: Date.now },
+                    _id: false,
+                },
+            ],
+            default: [],
+        },
+
         // ============================================
         // TUTOR
         // ============================================
