@@ -168,6 +168,8 @@ app.use('/cohort_student/tickets', rateLimit({ max: 30, windowMinutes: 15 }));
 app.use('/user_waitlist/generate-image', rateLimit({ max: 5, windowMinutes: 15 }));
 app.use('/user_waitlist/waitlist', rateLimit({ max: 5, windowMinutes: 15 }));
 app.use('/cohort_student/assignments', rateLimit({ max: 30, windowMinutes: 15 }));
+app.use('/push/subscription', rateLimit({ max: 30, windowMinutes: 15 }));
+app.use('/admin_push/send', rateLimit({ max: 20, windowMinutes: 15 }));
 app.use('/tutor_auth/login-tutor', loginLimit);
 app.use('/project_auth/login', loginLimit);
 app.use('/user/create_payment', rateLimit({ max: 20, windowMinutes: 15 }));
@@ -215,6 +217,7 @@ app.use('/tutor_cohort', require('./route_tutor/cohort'));
 app.use('/tutor_work', require('./route_tutor/cohortWork'));       // assignments + student questions (tutor)
 app.use('/cohort_student', require('./route_user/cohortWork'));   // assignments + questions (student)
 app.use('/materials', require('./route_materials/materials')); // password-protected slides + notes
+app.use('/push', require('./route_push/push'));                   // app: notifications on/off
 
 
 // Tutor routes
@@ -228,6 +231,7 @@ app.use('/admin_auth', require('./route_admin/auth'));
 app.use('/admin_ambassadors', require('./route_admin/ambassadors'));
 app.use('/admin_dashboard', require('./route_admin/dashboard'));
 app.use('/admin_cohort', require('./route_admin/cohortSchedule')); // timetable, class links, email a track
+app.use('/admin_push', require('./route_admin/push'));             // push notifications: test, send, history
 
 // Project routes
 app.use('/project_auth', require('./route_project/auth'));

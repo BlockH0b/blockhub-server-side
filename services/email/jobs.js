@@ -21,6 +21,7 @@ const cron = require("node-cron");
 const { queueBulk, retryDeferred } = require("./index");
 const { getConfig } = require("./config");
 const notify = require("./notify");
+const { pushFirst } = require("../push");
 
 const TZ = process.env.COHORT_TIMEZONE || "Africa/Lagos";
 const HOUR = 60 * 60 * 1000;
@@ -72,6 +73,16 @@ const TUTOR_NUDGE_MINUTES = String(process.env.TUTOR_LINK_NUDGE_MINUTES || "1440
 
 const inWindow = (msUntil, m) => msUntil > (m - 10) * 60 * 1000 && msUntil <= (m + 5) * 60 * 1000;
 
+// "in 1 hour", "in 30 minutes", "tomorrow"
+function whenText(minutes) {
+    if (minutes >= 1440) return minutes === 1440 ? "tomorrow" : `in ${Math.round(minutes / 1440)} days`;
+    if (minutes >= 60) return `in ${Math.round(minutes / 60)} hour${minutes >= 120 ? "s" : ""}`;
+    return `in ${minutes} minutes`;
+}
+
+const timeText = (date) =>
+    new Date(date).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ });
+
 async function classReminders() {
     const now = Date.now();
     // startDate is stored as a calendar date, so look at a few days around now
@@ -91,11 +102,21 @@ async function classReminders() {
         if (nudgeAt && !cls.meetLink && classDoc.tutor) {
             const tutor = await notify.userContact(classDoc.tutor);
             if (tutor) {
-                queueBulk([tutor], {
-                    template: "tutor_link_missing",
-                    category: "essential",
-                    dedupePrefix: `tutor-link-missing-${nudgeAt}:${classDoc._id}:${cls.startsAt.getTime()}`,
-                    data: { track: classDoc.track, cls, minutesLeft: nudgeAt },
+                await pushFirst([tutor], {
+                    push: {
+                        kind: "tutor_link_missing",
+                        title: `Add your Meet link: ${cls.title}`,
+                        message: `Your class starts ${whenText(nudgeAt)} (${timeText(cls.startsAt)}) and students don't have a link yet.`,
+                        url: "/cohort/tutor/dashboard",
+                        audience: classDoc.track,
+                        dedupeKey: `tutor-link-missing-${nudgeAt}:${classDoc._id}:${cls.startsAt.getTime()}`,
+                    },
+                    email: {
+                        template: "tutor_link_missing",
+                        category: "essential",
+                        dedupePrefix: `tutor-link-missing-${nudgeAt}:${classDoc._id}:${cls.startsAt.getTime()}`,
+                        data: { track: classDoc.track, cls, minutesLeft: nudgeAt },
+                    },
                 });
             }
         }
@@ -112,19 +133,33 @@ async function classReminders() {
             .lean();
 
         const students = await notify.trackStudents(classDoc.cohort, classDoc.track);
-        queueBulk(students, {
-            template: "class_reminder",
-            category: "classUpdates",
-            // 60 keeps the old key so a deploy never re-sends the 1-hour one
-            dedupePrefix: minutesLeft === 60
-                ? `class-reminder:${classDoc._id}:${cls.startsAt.getTime()}`
-                : `class-reminder-${minutesLeft}:${classDoc._id}:${cls.startsAt.getTime()}`,
-            data: {
-                track: classDoc.track,
-                cls,
-                minutesLeft,
-                meetLink: cls.meetLink,
-                joinUrl: session ? `${getConfig().frontendUrl}/class/${session.code}` : null,
+        const joinUrl = session ? `${getConfig().frontendUrl}/class/${session.code}` : null;
+        // 60 keeps the old key so a deploy never re-sends the 1-hour one
+        const reminderKey = minutesLeft === 60
+            ? `class-reminder:${classDoc._id}:${cls.startsAt.getTime()}`
+            : `class-reminder-${minutesLeft}:${classDoc._id}:${cls.startsAt.getTime()}`;
+
+        // Push to students with notifications on; email only the rest
+        await pushFirst(students, {
+            push: {
+                kind: "class_reminder",
+                title: `⏰ ${cls.title} starts ${whenText(minutesLeft)}`,
+                message: `${classDoc.track} · ${timeText(cls.startsAt)} (WAT). ${cls.meetLink || joinUrl ? "Tap to join." : "The link will be on your dashboard."}`,
+                url: cls.meetLink || joinUrl || "/cohort/my-dashboard",
+                audience: classDoc.track,
+                dedupeKey: reminderKey,
+            },
+            email: {
+                template: "class_reminder",
+                category: "classUpdates",
+                dedupePrefix: reminderKey,
+                data: {
+                    track: classDoc.track,
+                    cls,
+                    minutesLeft,
+                    meetLink: cls.meetLink,
+                    joinUrl,
+                },
             },
         });
 

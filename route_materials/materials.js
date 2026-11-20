@@ -31,6 +31,11 @@ const TRACKS = {
         slides: "MATERIALS_PASSWORD_BACKEND_SLIDES",
         notes: "MATERIALS_PASSWORD_BACKEND_NOTES",
     },
+    // Full-Stack uses the same passwords as Backend
+    "full-stack-development": {
+        slides: "MATERIALS_PASSWORD_BACKEND_SLIDES",
+        notes: "MATERIALS_PASSWORD_BACKEND_NOTES",
+    },
 };
 
 // type -> file name inside the week folder

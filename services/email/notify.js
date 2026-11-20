@@ -159,16 +159,27 @@ function cohortLoginLink({ email, name, url }) {
 function announcementPosted(announcement, tutorUser) {
     safely(async () => {
         const students = await trackStudents(announcement.cohort, announcement.track);
-        queueBulk(students, {
-            template: "announcement",
-            category: "announcements",
-            dedupePrefix: `announcement:${announcement._id}`,
-            data: {
-                tutorName: tutorUser?.fullName,
-                track: announcement.track,
-                title: announcement.title,
+        // Push to students with notifications on; email only the rest
+        await require("../push").pushFirst(students, {
+            push: {
+                kind: "announcement",
+                title: `${announcement.type === "important" ? "📌 " : ""}${announcement.title}`,
                 message: announcement.message,
-                type: announcement.type,
+                url: "/cohort/my-dashboard",
+                audience: announcement.track,
+                dedupeKey: `announcement:${announcement._id}`,
+            },
+            email: {
+                template: "announcement",
+                category: "announcements",
+                dedupePrefix: `announcement:${announcement._id}`,
+                data: {
+                    tutorName: tutorUser?.fullName,
+                    track: announcement.track,
+                    title: announcement.title,
+                    message: announcement.message,
+                    type: announcement.type,
+                },
             },
         });
     }, "notify.announcement");
