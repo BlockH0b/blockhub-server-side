@@ -67,13 +67,13 @@ MongoDB stores documents as **BSON** (binary JSON), which adds types like `Objec
 4. **Connect → Drivers** → copy the connection string:
 
 ```text
-mongodb+srv://daniel:<password>@cluster0.abcde.mongodb.net/?retryWrites=true&w=majority
+mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority
 ```
 
 5. Put your password in and add a **database name** before the `?`:
 
 ```text
-mongodb+srv://daniel:MyPass123@cluster0.abcde.mongodb.net/taskdb?retryWrites=true&w=majority
+mongodb+srv://YOUR_USERNAME:YOUR_PASSWORD@YOUR_CLUSTER.mongodb.net/taskdb?retryWrites=true&w=majority
 ```
 
 **Browse your data:** Atlas → **Browse Collections**, or install **MongoDB Compass** (desktop app) or the **MongoDB for VS Code** extension.
@@ -85,7 +85,7 @@ The connection string contains your password. **It must never be in your code or
 ```bash
 # .env
 PORT=5000
-MONGO_URI=mongodb+srv://daniel:MyPass123@cluster0.abcde.mongodb.net/taskdb
+MONGO_URI=mongodb+srv://YOUR_USERNAME:YOUR_PASSWORD@YOUR_CLUSTER.mongodb.net/taskdb
 ```
 
 ```text

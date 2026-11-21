@@ -33,7 +33,7 @@ Atlas is MongoDB in the cloud, with a free tier.
 4. **Connect → Drivers** → copy the connection string:
 
 ```text
-mongodb+srv://<username>:<password>@cluster0.abcde.mongodb.net/jobboard
+mongodb+srv://<username>:<password>@<cluster>.mongodb.net/jobboard
 ```
 
 Replace `<username>` and `<password>`, and add the database name (`jobboard`) before any `?`.
@@ -45,7 +45,7 @@ Replace `<username>` and `<password>`, and add the database name (`jobboard`) be
 ```bash
 # .env
 PORT=5000
-MONGO_URI=mongodb+srv://daniel:mypassword@cluster0.abcde.mongodb.net/jobboard
+MONGO_URI=mongodb+srv://YOUR_USERNAME:YOUR_PASSWORD@YOUR_CLUSTER.mongodb.net/jobboard
 JWT_SECRET=change-this-to-a-long-random-string
 ```
 
