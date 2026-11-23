@@ -98,6 +98,7 @@ async function sendEmail({
     dedupeKey,
     attachments,
     icalEvent, // calendar invite (see services/meetings/calendar.js)
+    replyTo, // e.g. the visitor's email on a contact-form message
     _skipTestLimit = false,
     _retryLogId = null, // set by the retry job: re-use that log
 }) {
@@ -169,6 +170,7 @@ async function sendEmail({
             headers,
             attachments,
             icalEvent,
+            replyTo,
         });
 
         await EmailLog.updateOne(

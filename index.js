@@ -169,6 +169,8 @@ app.use('/user_waitlist/generate-image', rateLimit({ max: 5, windowMinutes: 15 }
 app.use('/user_waitlist/waitlist', rateLimit({ max: 5, windowMinutes: 15 }));
 app.use('/cohort_student/assignments', rateLimit({ max: 30, windowMinutes: 15 }));
 app.use('/push/subscription', rateLimit({ max: 30, windowMinutes: 15 }));
+app.use('/contact', rateLimit({ max: 5, windowMinutes: 60 }));
+app.use('/track_chat/messages', rateLimit({ max: 60, windowMinutes: 1 }));
 app.use('/admin_push/send', rateLimit({ max: 20, windowMinutes: 15 }));
 app.use('/tutor_auth/login-tutor', loginLimit);
 app.use('/project_auth/login', loginLimit);
@@ -218,6 +220,8 @@ app.use('/tutor_work', require('./route_tutor/cohortWork'));       // assignment
 app.use('/cohort_student', require('./route_user/cohortWork'));   // assignments + questions (student)
 app.use('/materials', require('./route_materials/materials')); // password-protected slides + notes
 app.use('/push', require('./route_push/push'));                   // app: notifications on/off
+app.use('/contact', require('./route_contact/contact'));               // website contact form -> BlockHub inbox
+app.use('/track_chat', require('./route_chat/trackChat'));             // one group chat per track (students + tutor)
 
 
 // Tutor routes

@@ -354,6 +354,36 @@ const T = {
         text: `${track} ${cls.title} ${fmtDate(cls.startsAt)} ${fmtTime(cls.startsAt)}: ${meetLink}`,
     }),
 
+    // Website "Contact us" form -> BlockHub inbox
+    contact_message: ({ name, email, topic, message, page }) => ({
+        subject: `📨 Contact form: ${topic || "New message"} from ${name}`,
+        preheader: String(message || "").slice(0, 110),
+        html:
+            eyebrow("Website · Contact form") +
+            h1(`${esc(name)} sent a message`) +
+            details([
+                ["From", `${name} <${email}>`],
+                ["Topic", topic || "General"],
+                ...(page ? [["Page", page]] : []),
+            ]) +
+            quote(textToHtml(message), "#48FF75") +
+            small("Reply to this email to answer them directly."),
+        text: `From: ${name} <${email}>\nTopic: ${topic || "General"}\n\n${message}`,
+    }),
+
+    // Auto-reply to the person who used the contact form
+    contact_received: ({ name, message }, ctx) => ({
+        subject: "We got your message 👋",
+        preheader: "Thanks for reaching out to BlockHub.",
+        html:
+            eyebrow("BlockHub") +
+            h1(`Thanks, ${esc(first(name))}`) +
+            p("We've received your message and someone from the team will get back to you soon, usually within 1–2 working days.") +
+            quote(textToHtml(message), "#48FF75") +
+            button("Visit BlockHub", ctx.frontendUrl),
+        text: `Thanks, ${first(name)}. We've received your message and will reply soon.\n\n${message}`,
+    }),
+
     // Admin "Email a track" message
     admin_message: ({ name, track, subject, message, senderName }, ctx) => ({
         subject: subject,

@@ -56,28 +56,29 @@ const DEFAULT_COHORT = process.env.DEFAULT_COHORT || "cohort-1.0";
  * day: 0 = Sunday ... 6 = Saturday
  */
 const MASTER_TIMETABLE = [
-    { day: 1, track: "Full Stack Web Development", start: "18:00", end: "21:00" },
+    // Updated 23 Nov 2026 (new Cohort 1.0 master timetable)
+    { day: 1, track: "Full Stack Web Development", start: "20:00", end: "22:00" },
+    { day: 1, track: "2D Design & Animation", start: "20:00", end: "22:00" },
 
     { day: 2, track: "AI Video & Content Creation", start: "20:00", end: "22:00" },
+    { day: 2, track: "Backend Development", start: "21:00", end: "22:00" },
 
-    { day: 3, track: "Backend Development", start: "18:00", end: "20:00" },
+    { day: 3, track: "Project Management", start: "20:00", end: "22:00" },
+    { day: 3, track: "Crypto Trading (Degen)", start: "20:30", end: "22:30" },
     { day: 3, track: "Data Analytics", start: "21:00", end: "23:00" },
-    { day: 3, track: "Crypto Trading (Degen)", start: "21:00", end: "23:00" },
 
-    { day: 4, track: "Backend Development", start: "18:00", end: "20:00" },
+    { day: 4, track: "AI Video & Content Creation", start: "20:00", end: "22:00" },
     { day: 4, track: "Vibecoding & Front-end Development", start: "20:00", end: "22:00" },
 
-    { day: 5, track: "Full Stack Web Development", start: "18:00", end: "20:00" },
+    { day: 5, track: "Full Stack Web Development", start: "20:00", end: "22:00" },
     { day: 5, track: "2D Design & Animation", start: "20:00", end: "22:00" },
-    { day: 5, track: "Project Management", start: "20:00", end: "22:00" },
-    { day: 5, track: "Data Analytics", start: "21:00", end: "23:00" },
 
-    { day: 6, track: "Project Management", start: "19:00", end: "21:00" },
-    { day: 6, track: "2D Design & Animation", start: "20:00", end: "22:00" },
-    { day: 6, track: "AI Video & Content Creation", start: "20:00", end: "22:00" },
+    { day: 6, track: "Project Management", start: "20:00", end: "22:00" },
+    { day: 6, track: "Backend Development", start: "20:00", end: "22:00" },
     { day: 6, track: "Crypto Trading (Degen)", start: "21:00", end: "23:00" },
 
     { day: 0, track: "Vibecoding & Front-end Development", start: "20:00", end: "22:00" },
+    { day: 0, track: "Data Analytics", start: "21:00", end: "23:00" },
 ];
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -318,6 +319,172 @@ router.post("/schedule/generate", async (req, res) => {
     } catch (error) {
         console.error("[admin_cohort] generate", error);
         return res.status(500).json({ success: false, message: "Could not create the timetable." });
+    }
+});
+
+/* ------------------------------------------------------------
+   POST /schedule/resync
+   body: { fromDate?: "2026-11-23", dryRun: true, tracks?: [], notifyStudents?: false }
+   Moves every UPCOMING scheduled class onto the current master
+   timetable. Classes keep their Meet link, tutor and id - only the
+   day and time change, in order. Extra old classes are removed and
+   missing ones are added. Classes already started/past are untouched.
+   No per-class emails. With notifyStudents=true each track gets ONE
+   push/email listing its new days and times.
+------------------------------------------------------------ */
+router.post("/schedule/resync", async (req, res) => {
+    try {
+        const cohort = req.body?.cohort || DEFAULT_COHORT;
+        const dryRun = req.body?.dryRun !== false;
+        const now = new Date();
+        const todayYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Lagos" }).format(now);
+        const from = utcDay(req.body?.fromDate || todayYmd);
+        if (!from) return res.status(400).json({ success: false, message: "From date must look like 2026-11-23." });
+
+        const onlyTracks = Array.isArray(req.body?.tracks) ? req.body.tracks.map(normalizeTrack).filter(Boolean) : [];
+        const tracks = [...new Set(MASTER_TIMETABLE.map((s) => s.track))].filter(
+            (t) => !onlyTracks.length || onlyTracks.includes(t)
+        );
+
+        const tutors = await CohortTutor.find({ cohort, status: "active" }).select("user track").lean();
+        const tutorFor = new Map();
+        for (const t of tutors) {
+            const track = normalizeTrack(t.track);
+            if (track && !tutorFor.has(track)) tutorFor.set(track, t.user);
+        }
+
+        const report = [];
+        const updates = [];
+        const inserts = [];
+        const removals = [];
+
+        for (const track of tracks) {
+            const future = (
+                await CohortClass.find({
+                    cohort,
+                    track,
+                    status: "scheduled",
+                    startDate: { $gte: new Date(from.getTime() - 86400000) },
+                }).lean()
+            )
+                .filter((c) => {
+                    const at = getClassStartsAt(c);
+                    return at && at > now && new Date(c.startDate) >= from;
+                })
+                .sort((a, b) => getClassStartsAt(a) - getClassStartsAt(b));
+
+            if (!future.length) {
+                report.push({ track, moved: 0, added: 0, removed: 0, note: "no upcoming classes" });
+                continue;
+            }
+
+            // Same horizon as before: up to the day of the last upcoming class
+            const lastDay = new Date(future[future.length - 1].startDate);
+            const slots = MASTER_TIMETABLE.filter((s) => s.track === track);
+            const wanted = [];
+            for (let d = new Date(from); d <= lastDay; d = new Date(d.getTime() + 86400000)) {
+                for (const slot of slots.filter((s) => s.day === d.getUTCDay())) {
+                    const candidate = { startDate: new Date(d), startTime: slot.start, endTime: slot.end };
+                    const at = getClassStartsAt(candidate);
+                    if (at && at > now) wanted.push(candidate);
+                }
+            }
+            wanted.sort((a, b) => getClassStartsAt(a) - getClassStartsAt(b));
+
+            let moved = 0;
+            const pairs = Math.min(future.length, wanted.length);
+            for (let i = 0; i < pairs; i += 1) {
+                const c = future[i];
+                const w = wanted[i];
+                const same =
+                    ymd(new Date(c.startDate)) === ymd(w.startDate) && c.startTime === w.startTime && c.endTime === w.endTime;
+                if (same) continue;
+                moved += 1;
+                updates.push({
+                    updateOne: {
+                        filter: { _id: c._id },
+                        update: {
+                            $set: {
+                                startDate: w.startDate,
+                                startTime: w.startTime,
+                                endTime: w.endTime,
+                                durationMinutes: minutesOf(w.endTime) - minutesOf(w.startTime),
+                            },
+                        },
+                    },
+                });
+            }
+
+            const extra = future.slice(pairs);
+            extra.forEach((c) => removals.push(c._id));
+
+            const missing = wanted.slice(pairs);
+            const template = future[future.length - 1];
+            missing.forEach((w) =>
+                inserts.push({
+                    cohort,
+                    track,
+                    title: "Class",
+                    description: null,
+                    classNumber: null,
+                    startDate: w.startDate,
+                    startTime: w.startTime,
+                    endTime: w.endTime,
+                    durationMinutes: minutesOf(w.endTime) - minutesOf(w.startTime),
+                    meetingLink: template.meetingLink || null,
+                    meetingStatus: template.meetingLink ? template.meetingStatus || "available" : "pending",
+                    meetSource: template.meetSource || null,
+                    tutor: template.tutor || tutorFor.get(track) || null,
+                    createdBy: req.adminUser?._id || null,
+                    status: "scheduled",
+                    emailStudents: template.emailStudents !== false,
+                })
+            );
+
+            const days = slots
+                .slice()
+                .sort((a, b) => ((a.day + 6) % 7) - ((b.day + 6) % 7))
+                .map((s) => `${DAY_NAMES[s.day]} ${s.start}–${s.end}`);
+            report.push({ track, moved, added: missing.length, removed: extra.length, upcoming: wanted.length, newTimes: days });
+        }
+
+        if (!dryRun) {
+            if (updates.length) await CohortClass.bulkWrite(updates, { ordered: false });
+            if (inserts.length) await CohortClass.insertMany(inserts, { ordered: false });
+            if (removals.length) await CohortClass.deleteMany({ _id: { $in: removals } });
+            await renumberClasses({ cohort });
+
+            if (req.body?.notifyStudents === true) {
+                const batchId = `timetable-${Date.now()}`;
+                for (const r of report) {
+                    if (!r.newTimes?.length) continue;
+                    await notify.trackMessage({
+                        cohort,
+                        tracks: [r.track],
+                        subject: "🗓️ Your class times have changed",
+                        message: `New ${r.track} class times (WAT): ${r.newTimes.join(" · ")}. Your dashboard already shows the new schedule.`,
+                        senderName: "BlockHub",
+                        batchId,
+                    });
+                }
+            }
+        }
+
+        const totals = report.reduce(
+            (t, r) => ({ moved: t.moved + (r.moved || 0), added: t.added + (r.added || 0), removed: t.removed + (r.removed || 0) }),
+            { moved: 0, added: 0, removed: 0 }
+        );
+
+        return res.json({
+            success: true,
+            message: dryRun
+                ? `Preview: ${totals.moved} classes move, ${totals.added} added, ${totals.removed} removed.`
+                : `Done: ${totals.moved} classes moved, ${totals.added} added, ${totals.removed} removed.`,
+            data: { dryRun, from: ymd(from), ...totals, tracks: report },
+        });
+    } catch (error) {
+        console.error("[admin_cohort] resync", error);
+        return res.status(500).json({ success: false, message: "Could not update the schedule." });
     }
 });
 

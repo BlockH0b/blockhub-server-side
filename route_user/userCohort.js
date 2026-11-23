@@ -416,9 +416,12 @@ router.get(
                 createdAt: item.createdAt,
             }));
 
+            // Once classes have started, everyone who can open this
+            // dashboard is in (nobody gets stuck on "Acceptance").
             const isAccepted =
                 registration.status === "accepted" ||
-                registration.status === "completed";
+                registration.status === "completed" ||
+                (cohortStatus !== "upcoming" && registration.status !== "rejected");
 
             const isRegistrationCompleted =
                 registration.status === "completed";
@@ -529,6 +532,14 @@ router.get(
                     },
                 ];
             }
+
+            journey = journey.map((step) =>
+                step.label === "Classes Begin" && step.status === "completed"
+                    ? { ...step, label: "Classes Started" }
+                    : step.label === "Acceptance" && step.status === "completed"
+                        ? { ...step, label: "Accepted" }
+                        : step
+            );
 
             // ==========================================
             // User name

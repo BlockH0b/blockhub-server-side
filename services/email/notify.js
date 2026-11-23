@@ -54,6 +54,19 @@ function classInfo(classDoc) {
     };
 }
 
+/* Push to students with notifications on, email the rest (saves the daily email limit) */
+const pushFirst = (...args) => require("../push").pushFirst(...args);
+
+const TZ = process.env.COHORT_TIMEZONE || "Africa/Lagos";
+/** "Sat 29 Nov, 8:00 pm" in Lagos time */
+function whenLabel(date) {
+    if (!date) return "";
+    return new Date(date).toLocaleString("en-GB", {
+        weekday: "short", day: "numeric", month: "short",
+        hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ,
+    });
+}
+
 function minutesBetween(classDoc) {
     const s = getClassStartsAt(classDoc);
     const e = getClassEndsAt(classDoc);
@@ -194,11 +207,21 @@ function classScheduled(classDoc) {
         const cls = classInfo(classDoc);
         if (cls.startsAt && cls.startsAt < new Date()) return; // created in the past - skip
         const students = await trackStudents(classDoc.cohort, classDoc.track);
-        queueBulk(students, {
-            template: "class_scheduled",
-            category: "classUpdates",
-            dedupePrefix: `class-new:${classDoc._id}`,
-            data: { track: classDoc.track, cls },
+        await pushFirst(students, {
+            push: {
+                kind: "class_scheduled",
+                title: `📅 New class: ${cls.title}`,
+                message: `${classDoc.track} · ${whenLabel(cls.startsAt)} (WAT)`,
+                url: "/cohort/my-dashboard",
+                audience: classDoc.track,
+                dedupeKey: `class-new:${classDoc._id}`,
+            },
+            email: {
+                template: "class_scheduled",
+                category: "classUpdates",
+                dedupePrefix: `class-new:${classDoc._id}`,
+                data: { track: classDoc.track, cls },
+            },
         });
     }, "notify.classScheduled");
 }
@@ -209,12 +232,23 @@ function classUpdated(classDoc, previousStartsAt) {
         const cls = classInfo(classDoc);
         if (!cls.startsAt || cls.startsAt < new Date()) return;
         const students = await trackStudents(classDoc.cohort, classDoc.track);
-        queueBulk(students, {
-            template: "class_updated",
-            category: "classUpdates",
-            // new key per new time, so a second change also notifies
-            dedupePrefix: `class-moved:${classDoc._id}:${cls.startsAt.getTime()}`,
-            data: { track: classDoc.track, cls, changes: { previousStartsAt } },
+        // new key per new time, so a second change also notifies
+        const key = `class-moved:${classDoc._id}:${cls.startsAt.getTime()}`;
+        await pushFirst(students, {
+            push: {
+                kind: "class_updated",
+                title: `🔁 Class time changed: ${cls.title}`,
+                message: `Now ${whenLabel(cls.startsAt)} (WAT)${previousStartsAt ? `, was ${whenLabel(previousStartsAt)}` : ""}.`,
+                url: "/cohort/my-dashboard",
+                audience: classDoc.track,
+                dedupeKey: key,
+            },
+            email: {
+                template: "class_updated",
+                category: "classUpdates",
+                dedupePrefix: key,
+                data: { track: classDoc.track, cls, changes: { previousStartsAt } },
+            },
         });
     }, "notify.classUpdated");
 }
@@ -225,11 +259,21 @@ function classCancelled(classDoc) {
         const cls = classInfo(classDoc);
         if (cls.startsAt && cls.startsAt < new Date()) return;
         const students = await trackStudents(classDoc.cohort, classDoc.track);
-        queueBulk(students, {
-            template: "class_cancelled",
-            category: "classUpdates",
-            dedupePrefix: `class-cancelled:${classDoc._id}`,
-            data: { track: classDoc.track, cls },
+        await pushFirst(students, {
+            push: {
+                kind: "class_cancelled",
+                title: `❌ Class cancelled: ${cls.title}`,
+                message: `The ${whenLabel(cls.startsAt)} ${classDoc.track} class won't hold. Check your dashboard for the next one.`,
+                url: "/cohort/my-dashboard",
+                audience: classDoc.track,
+                dedupeKey: `class-cancelled:${classDoc._id}`,
+            },
+            email: {
+                template: "class_cancelled",
+                category: "classUpdates",
+                dedupePrefix: `class-cancelled:${classDoc._id}`,
+                data: { track: classDoc.track, cls },
+            },
         });
     }, "notify.classCancelled");
 }
@@ -244,11 +288,21 @@ function classLinkReady(classDoc, { changed = false } = {}) {
         if (cls.endsAt && cls.endsAt < new Date()) return; // class already over
         const linkKey = require("crypto").createHash("sha1").update(cls.meetLink).digest("hex").slice(0, 12);
         const students = await trackStudents(classDoc.cohort, classDoc.track);
-        queueBulk(students, {
-            template: "class_link_ready",
-            category: "classUpdates",
-            dedupePrefix: `class-link:${classDoc._id}:${linkKey}`,
-            data: { track: classDoc.track, cls, meetLink: cls.meetLink, changed },
+        await pushFirst(students, {
+            push: {
+                kind: "class_link",
+                title: changed ? `🔗 New link for ${cls.title}` : `🔗 Class link is ready: ${cls.title}`,
+                message: `${whenLabel(cls.startsAt)} (WAT). Tap to open the meeting.`,
+                url: cls.meetLink,
+                audience: classDoc.track,
+                dedupeKey: `class-link:${classDoc._id}:${linkKey}`,
+            },
+            email: {
+                template: "class_link_ready",
+                category: "classUpdates",
+                dedupePrefix: `class-link:${classDoc._id}:${linkKey}`,
+                data: { track: classDoc.track, cls, meetLink: cls.meetLink, changed },
+            },
         });
 
         // Copy for the BlockHub team so someone can attend / keep an eye on it
@@ -281,11 +335,21 @@ function classExtraLink(classDoc, { url, label }) {
         const students = await trackStudents(classDoc.cohort, classDoc.track);
         const now = Date.now();
         const live = cls.startsAt && cls.startsAt.getTime() <= now && (!cls.endsAt || cls.endsAt.getTime() > now);
-        queueBulk(students, {
-            template: "class_extra_link",
-            category: "essential",
-            dedupePrefix: `class-extra:${classDoc._id}:${key}`,
-            data: { track: classDoc.track, cls, url, label, live },
+        await pushFirst(students, {
+            push: {
+                kind: "class_extra_link",
+                title: `🔗 ${label || "New class link"}: ${cls.title}`,
+                message: live ? "Class is on now. Tap to join this link." : "Tap to open the link.",
+                url,
+                audience: classDoc.track,
+                dedupeKey: `class-extra:${classDoc._id}:${key}`,
+            },
+            email: {
+                template: "class_extra_link",
+                category: "essential",
+                dedupePrefix: `class-extra:${classDoc._id}:${key}`,
+                data: { track: classDoc.track, cls, url, label, live },
+            },
         });
     }, "notify.classExtraLink");
 }
@@ -309,12 +373,23 @@ async function trackMessage({ cohort, tracks = [], subject, message, senderName,
 
     let queued = 0;
     for (const [track, students] of byTrack) {
-        queued += queueBulk(students, {
-            template: "admin_message",
-            category: "announcements",
-            dedupePrefix: `admin-msg:${batchId}`,
-            data: { track, subject, message, senderName },
+        const result = await pushFirst(students, {
+            push: {
+                kind: "admin_message",
+                title: subject,
+                message,
+                url: "/cohort/my-dashboard",
+                audience: track,
+                dedupeKey: `admin-msg:${batchId}:${track}`,
+            },
+            email: {
+                template: "admin_message",
+                category: "announcements",
+                dedupePrefix: `admin-msg:${batchId}`,
+                data: { track, subject, message, senderName },
+            },
         });
+        queued += (result?.pushed || 0) + (result?.emailed || 0);
     }
     return queued;
 }
@@ -339,11 +414,23 @@ function assignmentInfo(a) {
 function assignmentPosted(assignment, tutorUser) {
     safely(async () => {
         const students = await trackStudents(assignment.cohort, assignment.track);
-        queueBulk(students, {
-            template: "assignment_new",
-            category: "classUpdates",
-            dedupePrefix: `assignment:${assignment._id}`,
-            data: { track: assignment.track, tutorName: tutorUser?.fullName, a: assignmentInfo(assignment) },
+        await pushFirst(students, {
+            push: {
+                kind: "assignment",
+                title: `📝 New assignment: ${assignment.title}`,
+                message: assignment.dueAt
+                    ? `Due ${whenLabel(assignment.dueAt)}. Tap to read it and submit.`
+                    : "Tap to read it and submit.",
+                url: `/cohort/my-dashboard?tab=assignments&assignment=${assignment._id}`,
+                audience: assignment.track,
+                dedupeKey: `assignment:${assignment._id}`,
+            },
+            email: {
+                template: "assignment_new",
+                category: "classUpdates",
+                dedupePrefix: `assignment:${assignment._id}`,
+                data: { track: assignment.track, tutorName: tutorUser?.fullName, a: assignmentInfo(assignment) },
+            },
         });
     }, "notify.assignmentPosted");
 }
@@ -352,12 +439,24 @@ function assignmentPosted(assignment, tutorUser) {
 function submissionReviewed(submission, assignment, tutorUser) {
     safely(async () => {
         if (!submission.studentEmail) return;
-        queueBulk(
+        const reviewKey = `assignment-review:${submission._id}:${Date.now()}`;
+        await pushFirst(
             [{ userId: String(submission.student), email: submission.studentEmail, name: submission.studentName }],
             {
+              push: {
+                kind: "assignment_feedback",
+                title: `✅ Feedback on ${assignment.title}`,
+                message: [submission.grade ? `Grade: ${submission.grade}.` : "", submission.feedback || "Your tutor reviewed your work."]
+                    .filter(Boolean)
+                    .join(" "),
+                url: `/cohort/my-dashboard?tab=assignments&assignment=${assignment._id}`,
+                audience: submission.track,
+                dedupeKey: reviewKey,
+              },
+              email: {
                 template: "assignment_feedback",
                 category: "essential",
-                dedupePrefix: `assignment-review:${submission._id}:${Date.now()}`,
+                dedupePrefix: reviewKey,
                 data: {
                     track: submission.track,
                     title: assignment.title,
@@ -367,6 +466,7 @@ function submissionReviewed(submission, assignment, tutorUser) {
                     feedback: submission.feedback,
                     tutorName: tutorUser?.fullName,
                 },
+              },
             }
         );
     }, "notify.submissionReviewed");
@@ -382,17 +482,28 @@ function ticketToTutors(ticket, message, isNew) {
             .filter((t) => t.user?.email)
             .map((t) => ({ userId: String(t.user._id), email: t.user.email, name: t.user.fullName }));
         if (!people.length) return;
-        queueBulk(people, {
-            template: "ticket_to_tutor",
-            category: "essential",
-            dedupePrefix: `ticket:${ticket._id}:${message._id || Date.now()}`,
-            data: {
-                studentName: ticket.studentName || "A student",
-                track: ticket.track,
-                subject: ticket.subject,
+        const key = `ticket:${ticket._id}:${message._id || Date.now()}`;
+        await pushFirst(people, {
+            push: {
+                kind: "ticket_to_tutor",
+                title: `💬 ${ticket.studentName || "A student"}: ${ticket.subject}`,
                 message: message.body,
-                ticketId: String(ticket._id),
-                isNew,
+                url: `/cohort/tutor-dashboard?tab=tickets&ticket=${ticket._id}`,
+                audience: ticket.track,
+                dedupeKey: key,
+            },
+            email: {
+                template: "ticket_to_tutor",
+                category: "essential",
+                dedupePrefix: key,
+                data: {
+                    studentName: ticket.studentName || "A student",
+                    track: ticket.track,
+                    subject: ticket.subject,
+                    message: message.body,
+                    ticketId: String(ticket._id),
+                    isNew,
+                },
             },
         });
     }, "notify.ticketToTutors");
@@ -402,18 +513,29 @@ function ticketToTutors(ticket, message, isNew) {
 function ticketToStudent(ticket, message, tutorUser) {
     safely(async () => {
         if (!ticket.studentEmail) return;
-        queueBulk(
+        const key = `ticket-reply:${ticket._id}:${message._id || Date.now()}`;
+        await pushFirst(
             [{ userId: String(ticket.student), email: ticket.studentEmail, name: ticket.studentName }],
             {
-                template: "ticket_to_student",
-                category: "essential",
-                dedupePrefix: `ticket-reply:${ticket._id}:${message._id || Date.now()}`,
-                data: {
-                    tutorName: tutorUser?.fullName,
-                    track: ticket.track,
-                    subject: ticket.subject,
+                push: {
+                    kind: "ticket_to_student",
+                    title: `💬 ${tutorUser?.fullName || "Your tutor"} replied`,
                     message: message.body,
-                    ticketId: String(ticket._id),
+                    url: `/cohort/my-dashboard?tab=support&ticket=${ticket._id}`,
+                    audience: ticket.track,
+                    dedupeKey: key,
+                },
+                email: {
+                    template: "ticket_to_student",
+                    category: "essential",
+                    dedupePrefix: key,
+                    data: {
+                        tutorName: tutorUser?.fullName,
+                        track: ticket.track,
+                        subject: ticket.subject,
+                        message: message.body,
+                        ticketId: String(ticket._id),
+                    },
                 },
             }
         );
@@ -427,15 +549,21 @@ function classLive(session, tutorName) {
         const students = await trackStudents(session.cohort, session.track, {
             excludeUserIds: inCall.map((a) => a.user),
         });
-        queueBulk(students, {
-            template: "class_live",
-            category: "classUpdates",
-            dedupePrefix: `class-live:${session._id}`,
-            data: {
-                track: session.track,
-                title: session.title,
-                tutorName,
-                joinUrl: `${getConfig().frontendUrl}/class/${session.code}`,
+        const joinUrl = `${getConfig().frontendUrl}/class/${session.code}`;
+        await pushFirst(students, {
+            push: {
+                kind: "class_live",
+                title: `🔴 Live now: ${session.title}`,
+                message: `${tutorName || "Your tutor"} has started class. Tap to join.`,
+                url: joinUrl,
+                audience: session.track,
+                dedupeKey: `class-live:${session._id}`,
+            },
+            email: {
+                template: "class_live",
+                category: "classUpdates",
+                dedupePrefix: `class-live:${session._id}`,
+                data: { track: session.track, title: session.title, tutorName, joinUrl },
             },
         });
     }, "notify.classLive");
@@ -455,11 +583,21 @@ function missedClass(session) {
             excludeUserIds: joined.map((a) => a.user),
         });
 
-        queueBulk(absent, {
-            template: "missed_class",
-            category: "classUpdates",
-            dedupePrefix: `missed:${session._id}`,
-            data: { track: session.track, title: session.title, endedAt: session.endedAt || new Date() },
+        await pushFirst(absent, {
+            push: {
+                kind: "missed_class",
+                title: `We missed you in ${session.title}`,
+                message: "Catch up with this week's notes and ask your tutor if anything is unclear.",
+                url: "/cohort/my-dashboard",
+                audience: session.track,
+                dedupeKey: `missed:${session._id}`,
+            },
+            email: {
+                template: "missed_class",
+                category: "classUpdates",
+                dedupePrefix: `missed:${session._id}`,
+                data: { track: session.track, title: session.title, endedAt: session.endedAt || new Date() },
+            },
         });
     }, "notify.missedClass");
 }

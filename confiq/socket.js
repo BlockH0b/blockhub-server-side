@@ -71,7 +71,38 @@ module.exports = {
                 if (payload && typeof payload.code === 'string') socket.leave(`yt:${payload.code}`);
             });
 
+            // Track group chat: join with the ticket from GET /track_chat/me
+            socket.on('trackchat:join', async (payload) => {
+                try {
+                    const jwt = require('jsonwebtoken');
+                    const d = jwt.verify(String((payload && payload.ticket) || ''), process.env.JWT_SECRET);
+                    if (d.purpose !== 'trackchat' || !d.cohort || !d.track) return;
+                    const room = `trackchat:${d.cohort}:${d.track}`;
+                    if (socket.data.chatRoom && socket.data.chatRoom !== room) socket.leave(socket.data.chatRoom);
+                    socket.data.userId = String(d.userId);
+                    socket.data.chatName = d.name;
+                    socket.data.chatRoom = room;
+                    socket.join(room);
+                    const online = (await io.in(room).fetchSockets()).map((s) => s.data.userId);
+                    io.to(room).emit('trackchat:presence', { online: [...new Set(online)].length });
+                } catch (err) {
+                    socket.emit('trackchat:error', { message: 'Chat session expired. Refresh the page.' });
+                }
+            });
+
+            socket.on('trackchat:typing', () => {
+                if (socket.data.chatRoom) {
+                    socket.to(socket.data.chatRoom).emit('trackchat:typing', { userId: socket.data.userId, name: socket.data.chatName });
+                }
+            });
+
             socket.on('disconnect', () => {
+                if (socket.data && socket.data.chatRoom) {
+                    const room = socket.data.chatRoom;
+                    io.in(room).fetchSockets()
+                        .then((list) => io.to(room).emit('trackchat:presence', { online: new Set(list.map((s) => s.data.userId)).size }))
+                        .catch(() => {});
+                }
                 console.log('User disconnected:', socket.id);
             });
         });
